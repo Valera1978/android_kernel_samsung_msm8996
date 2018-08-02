@@ -163,8 +163,8 @@
 			compatible = "android,firmware";
 			fstab {
 				compatible = "android,fstab";
-				 system {
-					compatible = "android,system";
+				 system_src {
+					compatible = "android,system_src";
 					dev = "/dev/block/platform/soc/7464900.sdhci/by-name/system";
 					type = "ext4";
 					mnt_flags = "ro,errors=panic,noload";
