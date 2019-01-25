@@ -1,4 +1,4 @@
-/* Copyright (c) 2007-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2007-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,7 +26,6 @@
 #include <linux/dma-buf.h>
 #include <linux/of_platform.h>
 #include <linux/msm_dma_iommu_mapping.h>
-#include <linux/vmalloc.h>
 
 #include <linux/qcom_iommu.h>
 #include <asm/dma-iommu.h>
@@ -203,6 +202,7 @@ static int mdss_smmu_attach_v2(struct mdss_data_type *mdata)
 				}
 				mdss_smmu->domain_attached = true;
 				pr_debug("iommu v2 domain[%i] attached\n", i);
+				MDSS_XLOG(i, 0xA);
 			}
 		} else {
 			pr_err("iommu device not attached for domain[%d]\n", i);
@@ -217,6 +217,7 @@ err:
 		mdss_smmu = mdss_smmu_get_cb(i);
 		if (mdss_smmu && mdss_smmu->dev) {
 			arm_iommu_detach_device(mdss_smmu->dev);
+			MDSS_XLOG(i, 0xE);
 			mdss_smmu_enable_power(mdss_smmu, false);
 			mdss_smmu->domain_attached = false;
 		}
@@ -241,6 +242,7 @@ static int mdss_smmu_detach_v2(struct mdss_data_type *mdata)
 			continue;
 
 		mdss_smmu = mdss_smmu_get_cb(i);
+		MDSS_XLOG(i, 0xD);
 		if (mdss_smmu && mdss_smmu->dev && !mdss_smmu->handoff_pending)
 			mdss_smmu_enable_power(mdss_smmu, false);
 	}
@@ -296,6 +298,7 @@ static int mdss_smmu_map_dma_buf_v2(struct dma_buf *dma_buf,
 		return -ENOMEM;
 	}
 	ATRACE_END("map_buffer");
+	MDSS_XLOG(table->sgl->dma_address, table->sgl->dma_length, domain, 0);
 	*iova = table->sgl->dma_address;
 	*size = table->sgl->dma_length;
 	return 0;
@@ -313,6 +316,7 @@ static void mdss_smmu_unmap_dma_buf_v2(struct sg_table *table, int domain,
 	ATRACE_BEGIN("unmap_buffer");
 	msm_dma_unmap_sg(mdss_smmu->dev, table->sgl, table->nents, dir,
 		 dma_buf);
+	MDSS_XLOG(table->sgl->dma_address, table->sgl->dma_length, domain, 0);
 	ATRACE_END("unmap_buffer");
 }
 
@@ -454,6 +458,9 @@ int mdss_smmu_fault_handler(struct iommu_domain *domain, struct device *dev,
 	mid = fsynr1 & 0xff;
 	pr_err("mdss_smmu: iova:0x%lx flags:0x%x fsynr1: 0x%x mid: 0x%x\n",
 		iova, flags, fsynr1, mid);
+	MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
+				"dsi1_ctrl", "dsi1_phy", "vbif",
+				"vbif_nrt","dbg_bus", "vbif_dbg_bus", "panic");
 
 	/* get domain id information */
 	for (i = 0; i < MDSS_IOMMU_MAX_DOMAIN; i++) {
@@ -496,7 +503,7 @@ static void mdss_smmu_deinit_v2(struct mdss_data_type *mdata)
  *   either sides of sgl.
  *
  * Returns:
- *   Pointer to new vmalloced sg list, ERR_PTR() on error
+ *   Pointer to new kmalloced sg list, ERR_PTR() on error
  *
  */
 static struct scatterlist *sg_clone(struct scatterlist *orig_sgl, u64 len,
@@ -512,7 +519,7 @@ static struct scatterlist *sg_clone(struct scatterlist *orig_sgl, u64 len,
 	if (padding)
 		nents += 2;
 
-	head = vmalloc(nents * sizeof(struct scatterlist));
+	head = kmalloc_array(nents, sizeof(struct scatterlist), gfp_mask);
 	if (!head)
 		return ERR_PTR(-ENOMEM);
 

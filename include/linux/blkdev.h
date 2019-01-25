@@ -1163,6 +1163,7 @@ static inline struct request *blk_map_queue_find_tag(struct blk_queue_tag *bqt,
 }
 
 #define BLKDEV_DISCARD_SECURE  0x01    /* secure discard */
+#define BLKDEV_DISCARD_SYNC    0x02    /* sync discard   */
 
 extern int blkdev_issue_flush(struct block_device *, gfp_t, sector_t *);
 extern int blkdev_issue_barrier(struct block_device *, gfp_t, sector_t *);
@@ -1732,5 +1733,12 @@ static inline int blkdev_issue_flush(struct block_device *bdev, gfp_t gfp_mask,
 }
 
 #endif /* CONFIG_BLOCK */
+
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+#define SIO_PATCH_VERSION(name, major, minor, description)	\
+	static const char *sio_##name##_##major##_##minor __attribute__ ((used, section("sio_patches"))) = (#name " " #major "." #minor " " description)
+#else
+#define SIO_PATCH_VERSION(name, major, minor, description)
+#endif
 
 #endif

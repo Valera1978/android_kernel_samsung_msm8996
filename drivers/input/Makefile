@@ -29,3 +29,8 @@ obj-$(CONFIG_INPUT_KEYRESET)	+= keyreset.o
 obj-$(CONFIG_INPUT_KEYCOMBO)	+= keycombo.o
 obj-$(CONFIG_SENSORS_HALL)	+= hall_sensor.o
 obj-y	+= sensors/smi130/
+
+obj-$(CONFIG_INPUT_TOUCHSCREEN)	+= sec_cmd.o
+
+obj-$(CONFIG_INPUT_WACOM)	+= wacom/
+obj-$(CONFIG_INPUT_WACOM_TAB)	+= wacom_tab/

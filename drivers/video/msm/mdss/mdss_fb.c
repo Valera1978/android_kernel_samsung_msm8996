@@ -2,7 +2,7 @@
  * Core MDSS framebuffer driver.
  *
  * Copyright (C) 2007 Google Incorporated
- * Copyright (c) 2008-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2008-2017, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -54,7 +54,10 @@
 #include "mdss_debug.h"
 #include "mdss_smmu.h"
 #include "mdss_mdp.h"
-#include "mdp3_ctrl.h"
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+#include "samsung/ss_dsi_panel_common.h" /* UTIL HEADER */
+#endif
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MDSS_FB_NUM 3
@@ -122,6 +125,9 @@ static int mdss_fb_send_panel_event(struct msm_fb_data_type *mfd,
 					int event, void *arg);
 static void mdss_fb_set_mdp_sync_pt_threshold(struct msm_fb_data_type *mfd,
 		int type);
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+struct samsung_display_driver_data* mdss_samsung_get_vdd(struct mdss_mdp_ctl *ctl);
+#endif
 void mdss_fb_no_update_notify_timer_cb(unsigned long data)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)data;
@@ -343,9 +349,6 @@ static ssize_t mdss_fb_get_type(struct device *dev,
 		break;
 	case EDP_PANEL:
 		ret = snprintf(buf, PAGE_SIZE, "edp panel\n");
-		break;
-	case SPI_PANEL:
-		ret = snprintf(buf, PAGE_SIZE, "spi panel\n");
 		break;
 	default:
 		ret = snprintf(buf, PAGE_SIZE, "unknown panel\n");
@@ -581,6 +584,9 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 	struct msm_fb_data_type *mfd = fbi->par;
 	struct mdss_panel_info *pinfo = mfd->panel_info;
 	int ret;
+
+	pr_info("%s nxstart=%d\nwalign=%d\nystart=%d\n", __func__, pinfo->roi_alignment.xstart_pix_align
+		, pinfo->roi_alignment.width_pix_align, pinfo->roi_alignment.ystart_pix_align);
 
 	ret = scnprintf(buf, PAGE_SIZE,
 			"pu_en=%d\nxstart=%d\nwalign=%d\nystart=%d\nhalign=%d\n"
@@ -945,9 +951,6 @@ static void mdss_fb_shutdown(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
 
-	if (!mfd)
-		return;
-
 	mfd->shutdown_pending = true;
 
 	/* wake up threads waiting on idle or kickoff queues */
@@ -1160,14 +1163,29 @@ static int mdss_fb_init_panel_modes(struct msm_fb_data_type *mfd,
 
 	list_for_each_entry(pt, &pdata->timings_list, list) {
 		struct mdss_panel_timing *spt = NULL;
-
 		mdss_fb_videomode_from_panel_timing(modedb + i, pt);
 		if (pdata->next) {
 			spt = mdss_panel_get_timing_by_name(pdata->next,
 					modedb[i].name);
-			if (!IS_ERR_OR_NULL(spt))
+			if (!IS_ERR_OR_NULL(spt)) {
 				modedb[i].xres += spt->xres;
-			else
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+				if (modedb[i].refresh) {
+					unsigned long clk_rate, h_total, v_total;
+
+					h_total = modedb[i].xres + modedb[i].left_margin
+						+ modedb[i].right_margin + modedb[i].hsync_len;
+					v_total = modedb[i].yres + modedb[i].lower_margin
+						+ modedb[i].upper_margin + modedb[i].vsync_len;
+					clk_rate = h_total * v_total * modedb[i].refresh;
+					modedb[i].pixclock =
+						KHZ2PICOS(clk_rate / 1000);
+
+					pr_err("%s : new pixclock = %d\n", __func__, modedb[i].pixclock);
+				}
+#endif
+			} else
 				pr_debug("no matching split config for %s\n",
 						modedb[i].name);
 
@@ -1205,7 +1223,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	struct mdss_panel_data *pdata;
 	struct fb_info *fbi;
 	int rc;
-	const char *data;
 
 	if (fbi_list_index >= MAX_FBI_LIST)
 		return -ENOMEM;
@@ -1254,21 +1271,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 
 	mfd->pdev = pdev;
 
-	if (mfd->panel.type == SPI_PANEL)
-		mfd->fb_imgType = MDP_RGB_565;
-	if (mfd->panel.type == MIPI_VIDEO_PANEL || mfd->panel.type ==
-		MIPI_CMD_PANEL || mfd->panel.type == SPI_PANEL){
-		rc = of_property_read_string(pdev->dev.of_node,
-			"qcom,mdss-fb-format", &data);
-		if (!rc) {
-			if (!strcmp(data, "rgb888"))
-				mfd->fb_imgType = MDP_RGB_888;
-			else if (!strcmp(data, "rgb565"))
-				mfd->fb_imgType = MDP_RGB_565;
-			else
-				mfd->fb_imgType = MDP_RGBA_8888;
-		}
-	}
 	mfd->split_fb_left = mfd->split_fb_right = 0;
 
 	mdss_fb_set_split_mode(mfd, pdata);
@@ -1324,6 +1326,11 @@ static int mdss_fb_probe(struct platform_device *pdev)
 			pr_err("led_classdev_register failed\n");
 		else
 			lcd_backlight_registered = 1;
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		/* init bl_levle_scaled -1 to be set by bl_level 0 */
+		mfd->bl_level_scaled = -1;
+#endif
 	}
 
 	mdss_fb_init_panel_modes(mfd, pdata);
@@ -1352,14 +1359,11 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	 * Register with input driver for a callback for command mode panels.
 	 * When there is an input event, mdp clocks will be turned on to reduce
 	 * latency when a frame update happens.
-	 * For video mode panels, idle timeout will be delayed so that userspace
-	 * does not get an idle event while new frames are expected. In case of
-	 * an idle event, user space tries to fall back to GPU composition which
-	 * can lead to increased load when there are new frames.
+	 * Video mode panels are not handled today because clocks are always on.
 	 */
+
 	if (mfd->mdp.input_event_handler &&
-		((mfd->panel_info->type == MIPI_CMD_PANEL) ||
-		(mfd->panel_info->type == MIPI_VIDEO_PANEL)))
+		(mfd->panel_info->type == MIPI_CMD_PANEL))
 		if (mdss_fb_register_input_handler(mfd))
 			pr_err("failed to register input handler\n");
 
@@ -1379,7 +1383,6 @@ static void mdss_fb_set_mdp_sync_pt_threshold(struct msm_fb_data_type *mfd,
 		mfd->mdp_sync_pt_data.threshold = 1;
 		mfd->mdp_sync_pt_data.retire_threshold = 0;
 		break;
-	case SPI_PANEL:
 	case MIPI_CMD_PANEL:
 		mfd->mdp_sync_pt_data.threshold = 1;
 		mfd->mdp_sync_pt_data.retire_threshold = 1;
@@ -1669,7 +1672,6 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	u32 temp = bkl_lvl;
 	bool ad_bl_notify_needed = false;
 	bool bl_notify_needed = false;
-	bool twm_en = false;
 
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->allow_bl_update) && !IS_CALIB_MODE_BL(mfd)) ||
@@ -1704,16 +1706,9 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 			if (mfd->bl_level != bkl_lvl)
 				bl_notify_needed = true;
 			pr_debug("backlight sent to panel :%d\n", temp);
-			if (mfd->mdp.is_twm_en)
-				twm_en = mfd->mdp.is_twm_en();
-
-			if (twm_en) {
-				pr_info("TWM Enabled skip backlight update\n");
-			} else {
-				pdata->set_backlight(pdata, temp);
-				mfd->bl_level = bkl_lvl;
-				mfd->bl_level_scaled = temp;
-			}
+			pdata->set_backlight(pdata, temp);
+			mfd->bl_level = bkl_lvl;
+			mfd->bl_level_scaled = temp;
 		}
 		if (ad_bl_notify_needed)
 			mdss_fb_bl_update_notify(mfd,
@@ -1863,7 +1858,7 @@ static int mdss_fb_blank_blank(struct msm_fb_data_type *mfd,
 	ret = mfd->mdp.off_fnc(mfd);
 	if (ret)
 		mfd->panel_power_state = cur_power_state;
-	else if (!mdss_panel_is_power_on_interactive(req_power_state))
+	else if (mdss_panel_is_power_off(req_power_state))
 		mdss_fb_release_fences(mfd);
 	mfd->op_enable = true;
 	complete(&mfd->power_off_comp);
@@ -1966,6 +1961,9 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	int ret = 0;
 	int cur_power_state, req_power_state = MDSS_PANEL_POWER_OFF;
 	char trace_buffer[32];
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	struct samsung_display_driver_data *vdd = samsung_get_vdd();
+#endif
 
 	if (!mfd || !op_enable)
 		return -EPERM;
@@ -1975,6 +1973,17 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 
 	pr_debug("%pS mode:%d\n", __builtin_return_address(0),
 		blank_mode);
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	pr_err("FB_NUM:%d, MDSS_FB_%s ++ on=%d\n", mfd->panel_info->fb_num,
+			blank_mode == FB_BLANK_POWERDOWN ? "BLANK":
+			blank_mode == FB_BLANK_HSYNC_SUSPEND ? "BLANK":
+			blank_mode == FB_BLANK_UNBLANK ? "UNBLANK":
+			blank_mode == BLANK_FLAG_LP ? "DOZE":
+			blank_mode == BLANK_FLAG_ULP ? "DOZE_SUSPEND":"NONE",
+			mdss_fb_is_power_on(mfd));
+	MDSS_XLOG(0x11111, blank_mode, mfd->panel_power_state);
+#endif
 
 	snprintf(trace_buffer, sizeof(trace_buffer), "fb%d blank %d",
 		mfd->index, blank_mode);
@@ -1987,14 +1996,6 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	 * supported for command mode panels. For all other panel, treat lp
 	 * mode as full unblank and ulp mode as full blank.
 	 */
-	if ((mfd->panel_info->type == SPI_PANEL) &&
-		((BLANK_FLAG_LP == blank_mode) ||
-		(BLANK_FLAG_ULP == blank_mode))) {
-		pr_debug("lp/ulp mode are not supported for SPI panels\n");
-		if (mdss_fb_is_power_on_interactive(mfd))
-			return 0;
-	}
-
 	if (mfd->panel_info->type != MIPI_CMD_PANEL) {
 		if (BLANK_FLAG_LP == blank_mode) {
 			pr_debug("lp mode only valid for cmd mode panels\n");
@@ -2011,9 +2012,20 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		}
 	}
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	mutex_lock(&vdd->vdd_blank_unblank_lock);
+	if (info->node <= (SUPPORT_PANEL_COUNT - 1))
+		vdd->vdd_blank_mode[info->node] =  blank_mode;
+	mutex_unlock(&vdd->vdd_blank_unblank_lock);
+#endif
+
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
 		pr_debug("unblank called. cur pwr state=%d\n", cur_power_state);
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		if (wake_lock_active(&vdd->doze_wakelock))
+			wake_unlock(&vdd->doze_wakelock);
+#endif
 		ret = mdss_fb_blank_unblank(mfd);
 		break;
 	case BLANK_FLAG_ULP:
@@ -2024,6 +2036,10 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			return 0;
 		}
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		if (wake_lock_active(&vdd->doze_wakelock))
+			wake_unlock(&vdd->doze_wakelock);
+#endif
 		ret = mdss_fb_blank_blank(mfd, req_power_state);
 		break;
 	case BLANK_FLAG_LP:
@@ -2041,6 +2057,10 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 				break;
 		}
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		if (!wake_lock_active(&vdd->doze_wakelock))
+			wake_lock(&vdd->doze_wakelock);
+#endif
 		ret = mdss_fb_blank_blank(mfd, req_power_state);
 		break;
 	case FB_BLANK_HSYNC_SUSPEND:
@@ -2048,6 +2068,10 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	default:
 		req_power_state = MDSS_PANEL_POWER_OFF;
 		pr_debug("blank powerdown called\n");
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		if (wake_lock_active(&vdd->doze_wakelock))
+			wake_unlock(&vdd->doze_wakelock);
+#endif
 		ret = mdss_fb_blank_blank(mfd, req_power_state);
 		break;
 	}
@@ -2056,6 +2080,18 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	sysfs_notify(&mfd->fbi->dev->kobj, NULL, "show_blank_event");
 
 	ATRACE_END(trace_buffer);
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	mdss_fb_send_panel_event(mfd,
+					blank_mode + MDSS_SAMSUNG_EVENT_MAX, NULL);
+
+	pr_err("FB_NUM:%d, MDSS_FB_%s -- \n", mfd->panel_info->fb_num,
+			blank_mode == FB_BLANK_POWERDOWN ? "BLANK":
+			blank_mode == FB_BLANK_HSYNC_SUSPEND ? "BLANK":
+			blank_mode == FB_BLANK_UNBLANK ? "UNBLANK":
+			blank_mode == BLANK_FLAG_LP ? "DOZE":
+			blank_mode == BLANK_FLAG_ULP ? "DOZE_SUSPEND":"NONE");
+#endif
 
 	return ret;
 }
@@ -2854,7 +2890,9 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 		 * enabling ahead of unblank. for some special cases like
 		 * adb shell stop/start.
 		 */
+		mutex_lock(&mfd->bl_lock);
 		mdss_fb_set_backlight(mfd, 0);
+		mutex_unlock(&mfd->bl_lock);
 
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 			mfd->op_enable);
@@ -2963,11 +3001,12 @@ static int __mdss_fb_wait_for_fence_sub(struct msm_sync_pt_data *sync_pt_data,
 			pr_cont("Waiting %ld.%ld more seconds\n",
 				(wait_ms/MSEC_PER_SEC), (wait_ms%MSEC_PER_SEC));
 			MDSS_XLOG(sync_pt_data->timeline_value);
-			MDSS_XLOG_TOUT_HANDLER("mdp");
 			ret = sync_fence_wait(fences[i], wait_ms);
 
-			if (ret == -ETIME)
+			if (ret == -ETIME) {
+				MDSS_XLOG_TOUT_HANDLER("mdp", "panic");
 				break;
+			}
 		}
 		sync_fence_put(fences[i]);
 	}
@@ -2975,6 +3014,7 @@ static int __mdss_fb_wait_for_fence_sub(struct msm_sync_pt_data *sync_pt_data,
 	if (ret < 0) {
 		pr_err("%s: sync_fence_wait failed! ret = %x\n",
 				sync_pt_data->fence_name, ret);
+		//MDSS_XLOG_TOUT_HANDLER("mdp", "panic");
 		for (; i < fence_cnt; i++)
 			sync_fence_put(fences[i]);
 	}
@@ -3012,10 +3052,12 @@ void mdss_fb_signal_timeline(struct msm_sync_pt_data *sync_pt_data)
 		MDSS_XLOG(sync_pt_data->timeline_value);
 		sync_pt_data->timeline_value++;
 
+		MDSS_XLOG(atomic_read(&sync_pt_data->commit_cnt), sync_pt_data->timeline_value, 1);
 		pr_debug("%s: buffer signaled! timeline val=%d remaining=%d\n",
 			sync_pt_data->fence_name, sync_pt_data->timeline_value,
 			atomic_read(&sync_pt_data->commit_cnt));
 	} else {
+		MDSS_XLOG(atomic_read(&sync_pt_data->commit_cnt), sync_pt_data->timeline_value, 0);
 		pr_debug("%s timeline signaled without commits val=%d\n",
 			sync_pt_data->fence_name, sync_pt_data->timeline_value);
 	}
@@ -3149,8 +3191,10 @@ static int mdss_fb_pan_idle(struct msm_fb_data_type *mfd)
 		pr_err("%pS: wait for idle timeout commits=%d\n",
 				__builtin_return_address(0),
 				atomic_read(&mfd->commits_pending));
+		#if 0
 		MDSS_XLOG_TOUT_HANDLER("mdp", "vbif", "vbif_nrt",
 			"dbg_bus", "vbif_dbg_bus");
+		#endif
 		ret = -ETIMEDOUT;
 	} else if (mfd->shutdown_pending) {
 		pr_debug("Shutdown signalled\n");
@@ -3178,8 +3222,10 @@ static int mdss_fb_wait_for_kickoff(struct msm_fb_data_type *mfd)
 				__builtin_return_address(0),
 				atomic_read(&mfd->kickoff_pending),
 				atomic_read(&mfd->commits_pending));
+		#if 0
 		MDSS_XLOG_TOUT_HANDLER("mdp", "vbif", "vbif_nrt",
 			"dbg_bus", "vbif_dbg_bus");
+		#endif
 		ret = -ETIMEDOUT;
 	} else if (mfd->shutdown_pending) {
 		pr_debug("Shutdown signalled\n");
@@ -3395,13 +3441,13 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 			__ioctl_transition_dyn_mode_state(mfd,
 				MSMFB_ATOMIC_COMMIT, true, false);
 			if (mfd->panel.type == WRITEBACK_PANEL) {
-				if (!commit_v1->output_layer) {
+				output_layer = commit_v1->output_layer;
+				if (!output_layer) {
 					pr_err("Output layer is null\n");
 					goto end;
 				}
-				output_layer = commit_v1->output_layer;
 				wb_change = !mdss_fb_is_wb_config_same(mfd,
-						output_layer);
+						commit_v1->output_layer);
 				if (wb_change) {
 					old_xres = pinfo->xres;
 					old_yres = pinfo->yres;
@@ -3438,6 +3484,7 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 	mfd->msm_fb_backup.atomic_commit = true;
 	mfd->msm_fb_backup.disp_commit.l_roi =  commit_v1->left_roi;
 	mfd->msm_fb_backup.disp_commit.r_roi =  commit_v1->right_roi;
+	pr_debug("%s dsu_mode = %d, x = %4d, y = %4d, w = %4d, h = %4d\n", __func__, commit_v1->dsu_mode, commit_v1->left_roi.x, commit_v1->left_roi.y, commit_v1->left_roi.w,commit_v1->left_roi.h);
 
 	mutex_lock(&mfd->mdp_sync_pt_data.sync_mutex);
 	atomic_inc(&mfd->mdp_sync_pt_data.commit_cnt);
@@ -3445,6 +3492,17 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 	atomic_inc(&mfd->kickoff_pending);
 	wake_up_all(&mfd->commit_wait_q);
 	mutex_unlock(&mfd->mdp_sync_pt_data.sync_mutex);
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	/*
+	 * If the layer counter is 0,
+	 * the black screen will be display on screen
+	 */
+	if (((mfd->panel_power_state == MDSS_PANEL_POWER_LP1) ||
+				(mfd->panel_power_state == MDSS_PANEL_POWER_LP2)) &&
+			!commit_v1->input_layer_cnt)
+		pr_err("[Panel LPM] %s Input layer cnt is 0\n", __func__);
+#endif
 
 	if (wait_for_finish)
 		ret = mdss_fb_pan_idle(mfd);
@@ -3682,9 +3740,6 @@ skip_commit:
 	if (IS_ERR_VALUE(ret) || !sync_pt_data->flushed) {
 		mdss_fb_release_kickoff(mfd);
 		mdss_fb_signal_timeline(sync_pt_data);
-		if ((mfd->panel.type == MIPI_CMD_PANEL) &&
-			(mfd->mdp.signal_retire_fence))
-			mfd->mdp.signal_retire_fence(mfd, 1);
 	}
 
 	if (dynamic_dsi_switch) {
@@ -3694,7 +3749,7 @@ skip_commit:
 		mutex_lock(&mfd->switch_lock);
 		mfd->switch_state = MDSS_MDP_NO_UPDATE_REQUESTED;
 		mutex_unlock(&mfd->switch_lock);
-		if (new_dsi_mode != SWITCH_RESOLUTION)
+		if (mfd->switch_new_mode != SWITCH_RESOLUTION)
 			mfd->panel.type = new_dsi_mode;
 		pr_debug("Dynamic mode switch completed\n");
 	}
@@ -3920,6 +3975,8 @@ static int mdss_fb_videomode_switch(struct msm_fb_data_type *mfd,
 			mfd->panel_info->yres, mfd->split_mode,
 			XLOG_FUNC_EXIT);
 	pr_debug("fb%d: %s mode change complete\n", mfd->index, mode->name);
+
+	mfd->force_revalidate = true;
 
 	return ret;
 }
@@ -4359,6 +4416,7 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 
 skip_retire_fence:
 	sync_fence_install(rel_fence, rel_fen_fd);
+
 	mutex_unlock(&sync_pt_data->sync_mutex);
 
 	if (buf_sync->flags & MDP_BUF_SYNC_FLAG_WAIT)
@@ -4512,7 +4570,6 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	struct mdp_frc_info *frc_info = NULL;
 	struct mdp_frc_info __user *frc_info_user;
 	struct msm_fb_data_type *mfd;
-	struct mdss_overlay_private *mdp5_data = NULL;
 
 	ret = copy_from_user(&commit, argp, sizeof(struct mdp_layer_commit));
 	if (ret) {
@@ -4524,20 +4581,9 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	if (!mfd)
 		return -EINVAL;
 
-	mdp5_data = mfd_to_mdp5_data(mfd);
-
 	if (mfd->panel_info->panel_dead) {
 		pr_debug("early commit return\n");
 		MDSS_XLOG(mfd->panel_info->panel_dead);
-		/*
-		 * In case of an ESD attack, since we early return from the
-		 * commits, we need to signal the outstanding fences.
-		 */
-		mdss_fb_release_fences(mfd);
-		if ((mfd->panel.type == MIPI_CMD_PANEL) &&
-			mfd->mdp.signal_retire_fence && mdp5_data)
-			mfd->mdp.signal_retire_fence(mfd,
-						mdp5_data->retire_cnt);
 		return 0;
 	}
 
@@ -5054,6 +5100,9 @@ EXPORT_SYMBOL(mdss_fb_get_phys_info);
 int __init mdss_fb_init(void)
 {
 	int rc = -ENODEV;
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	struct samsung_display_driver_data *vdd = samsung_get_vdd();
+#endif
 
 	if (fb_get_options("msmfb", NULL))
 		return rc;
@@ -5061,6 +5110,9 @@ int __init mdss_fb_init(void)
 	if (platform_driver_register(&mdss_fb_driver))
 		return rc;
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	wake_lock_init(&vdd->doze_wakelock, WAKE_LOCK_SUSPEND,"doze-wakelock");
+#endif
 	return 0;
 }
 

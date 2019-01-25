@@ -515,12 +515,11 @@ int mdss_mdp_get_plane_sizes(struct mdss_mdp_format_params *fmt, u32 w, u32 h,
 	if (ps == NULL)
 		return -EINVAL;
 
-	memset(ps, 0, sizeof(struct mdss_mdp_plane_sizes));
-
 	if ((w > MAX_IMG_WIDTH) || (h > MAX_IMG_HEIGHT))
 		return -ERANGE;
 
 	bpp = fmt->bpp;
+	memset(ps, 0, sizeof(struct mdss_mdp_plane_sizes));
 
 	if (mdss_mdp_is_ubwc_format(fmt)) {
 		rc = mdss_mdp_get_ubwc_plane_size(fmt, w, h, ps);
@@ -934,6 +933,7 @@ static int mdss_mdp_put_img(struct mdss_mdp_img_data *data, bool rotator,
 	} else if (!IS_ERR_OR_NULL(data->srcp_dma_buf)) {
 		pr_debug("ion hdl=%pK buf=0x%pa\n", data->srcp_dma_buf,
 							&data->addr);
+		MDSS_XLOG(data->srcp_dma_buf, &data->addr, data->mapped);
 		if (!iclient) {
 			pr_err("invalid ion client\n");
 			return -ENOMEM;
@@ -1100,6 +1100,7 @@ static int mdss_mdp_get_img(struct msmfb_data *img,
 		pr_debug("mem=%d ihdl=%pK buf=0x%pa len=0x%lx\n",
 			 img->memory_id, data->srcp_dma_buf, &data->addr,
 			 data->len);
+		MDSS_XLOG(img->memory_id, data->srcp_dma_buf, &data->addr, data->len);
 	} else {
 		mdss_mdp_put_img(data, rotator, dir);
 		return ret ? : -EOVERFLOW;

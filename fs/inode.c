@@ -172,6 +172,10 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	mapping->backing_dev_info = &default_backing_dev_info;
 	mapping->writeback_index = 0;
 
+#ifdef CONFIG_SDP
+	mapping->userid = 0;
+#endif
+
 	/*
 	 * If the block_device provides a backing_dev_info for client
 	 * inodes then use that.  Otherwise the inode share the bdev's
@@ -1434,7 +1438,7 @@ void iput(struct inode *inode)
 {
 	if (!inode)
 		return;
-	BUG_ON(inode->i_state & I_CLEAR);
+		BUG_ON(inode->i_state & I_CLEAR);
 retry:
 	if (atomic_dec_and_lock(&inode->i_count, &inode->i_lock)) {
 		if (inode->i_nlink && (inode->i_state & I_DIRTY_TIME)) {
@@ -1445,7 +1449,7 @@ retry:
 			mark_inode_dirty_sync(inode);
 			goto retry;
 		}
-		iput_final(inode);
+			iput_final(inode);
 	}
 }
 EXPORT_SYMBOL(iput);

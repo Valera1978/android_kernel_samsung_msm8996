@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,6 +30,8 @@
 #define LPASS_BE_AUXPCM_TX "AUX_PCM_TX"
 #define LPASS_BE_SEC_AUXPCM_RX "SEC_AUX_PCM_RX"
 #define LPASS_BE_SEC_AUXPCM_TX "SEC_AUX_PCM_TX"
+#define LPASS_BE_TERT_AUXPCM_RX "TERT_AUX_PCM_RX"
+#define LPASS_BE_TERT_AUXPCM_TX "TERT_AUX_PCM_TX"
 #define LPASS_BE_VOICE_PLAYBACK_TX "VOICE_PLAYBACK_TX"
 #define LPASS_BE_VOICE2_PLAYBACK_TX "VOICE2_PLAYBACK_TX"
 #define LPASS_BE_INCALL_RECORD_RX "INCALL_RECORD_RX"
@@ -232,6 +234,8 @@ enum {
 	MSM_BACKEND_DAI_AUDIO_I2S_RX,
 	MSM_BACKEND_DAI_SEC_AUXPCM_RX,
 	MSM_BACKEND_DAI_SEC_AUXPCM_TX,
+	MSM_BACKEND_DAI_TERT_AUXPCM_RX,
+	MSM_BACKEND_DAI_TERT_AUXPCM_TX,
 	MSM_BACKEND_DAI_SLIMBUS_6_RX,
 	MSM_BACKEND_DAI_SLIMBUS_6_TX,
 	MSM_BACKEND_DAI_SPDIF_RX,
@@ -414,8 +418,4 @@ void msm_pcm_routing_reg_stream_app_type_cfg(int fedai_id, int app_type,
 			int acdb_dev_id, int sample_rate, int session_type);
 int msm_pcm_routing_get_stream_app_type_cfg(int fedai_id, int session_type,
 			int *app_type, int *acdb_dev_id, int *sample_rate);
-int msm_pcm_routing_send_chmix_cfg(int fe_id, int ip_channel_cnt,
-				int op_channel_cnt, int *ch_wght_coeff,
-				int session_type, bool use_default_chmap,
-				char *channel_map);
 #endif /*_MSM_PCM_H*/

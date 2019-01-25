@@ -35,6 +35,9 @@
 #include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_RKP_CFP
+#include <asm/rkp_cfp.h>
+#endif
 /*
  * Context tracking subsystem.  Used to instrument transitions
  * between user and kernel mode.
@@ -124,8 +127,30 @@ alternative_else_nop_endif
 	and	tsk, tsk, #~(THREAD_SIZE - 1)	// Ensure MDSCR_EL1.SS is clear,
 	ldr	x19, [tsk, #TI_FLAGS]		// since we can unmask debug
 #endif
-	disable_step_tsk x19, x20		// exceptions when scheduling.
+#ifdef CONFIG_RKP_CFP_ROPP
+#ifdef CONFIG_RKP_CFP_ROPP_HYPKEY
+	push	x0, x1
+	mov	x0, #0x1000
+	movk	x0, #0x8389, lsl #16
+	mov	x1, tsk
+	add	x1, x1, #TI_RRK
+	hvc	#0
+	pop	x0, x1
+#elif defined (CONFIG_RKP_CFP_ROPP_RANDOM_KEY)
+	mrs	RRK, CNTPCT_EL0
+	str	RRK, [tsk, #TI_RRK]
+#else
+	mov	RRK, #0
+	str	RRK, [tsk, #TI_RRK]
+#endif
+#endif
+        disable_step_tsk x19, x20		// exceptions when scheduling.
 	.else
+	/* From el1, don't change key as need for reencrypt*/
+#ifdef CONFIG_RKP_CFP_ROPP
+	get_thread_info tsk //Needed for load key
+	load_key 	tsk
+#endif
 	add	x21, sp, #S_FRAME_SIZE
 	get_thread_info tsk
 	/* Save the task's original addr_limit and set USER_DS (TASK_SIZE_64) */
@@ -330,7 +355,11 @@ tsk	.req	x28		// current thread_info
  */
 
 	.align	11
+#ifdef CONFIG_RKP_CFP_JOPP
+VECTOR_ENTRY(vectors)
+#else
 ENTRY(vectors)
+#endif
 	kernel_ventry	1, sync_invalid			// Synchronous EL1t
 	kernel_ventry	1, irq_invalid			// IRQ EL1t
 	kernel_ventry	1, fiq_invalid			// FIQ EL1t

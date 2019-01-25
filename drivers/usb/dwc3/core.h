@@ -34,6 +34,9 @@
 #include <linux/usb/otg.h>
 
 #include <linux/phy/phy.h>
+#ifdef CONFIG_USB_CHARGING_EVENT
+#include "../../battery_v2/include/sec_charging_common.h"
+#endif
 
 #define DWC3_MSG_MAX	500
 
@@ -108,7 +111,6 @@
 #define DWC3_GPRTBIMAP_HS1	0xc184
 #define DWC3_GPRTBIMAP_FS0	0xc188
 #define DWC3_GPRTBIMAP_FS1	0xc18c
-#define DWC3_GUCTL2		0xc19c
 
 #define DWC3_GUSB2PHYCFG(n)	(0xc200 + (n * 0x04))
 #define DWC3_GUSB2I2CCTL(n)	(0xc240 + (n * 0x04))
@@ -191,12 +193,10 @@
 /* Host waits for DTCT value before timeout. Recommended to be POR value */
 #define DWC3_GUCTL_DTCT(n) ((n) << 9)
 #define DWC3_GUCTL_DTCT_MASK (2 << 9)
+#define DWC3_GUCTL_SPRSCRTLTRANSEN (1 << 17)
 
 /* Global Debug LTSSM Register */
 #define DWC3_GDBGLTSSM_LINKSTATE_MASK	(0xF << 22)
-
-/* Global User Control 2 Register */
-#define DWC3_GUCTL2_ENABLE_EP_CACHE_EVICT	(1 << 12)
 
 /* Global USB2 PHY Configuration Register */
 #define DWC3_GUSB2PHYCFG_PHYSOFTRST	(1 << 31)
@@ -913,9 +913,6 @@ struct dwc3 {
 #define DWC3_REVISION_260A	0x5533260a
 #define DWC3_REVISION_270A	0x5533270a
 #define DWC3_REVISION_280A	0x5533280a
-#define DWC3_REVISION_300A	0x5533300a
-#define DWC3_REVISION_310A	0x5533310a
-#define DWC3_REVISION_320A	0x5533320a
 
 	enum dwc3_ep0_next	ep0_next_event;
 	enum dwc3_ep0_state	ep0state;
@@ -996,6 +993,10 @@ struct dwc3 {
 
 	wait_queue_head_t	wait_linkstate;
 	void			*dwc_ipc_log_ctxt;
+#if IS_ENABLED(CONFIG_USB_CHARGING_EVENT)
+	struct work_struct      set_vbus_current_work;
+	int			vbus_current; /* 0 : 100mA, 1 : 500mA, 2: 900mA */
+#endif
 	int			last_fifo_depth;
 };
 

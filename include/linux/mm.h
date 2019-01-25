@@ -106,6 +106,12 @@ extern struct rw_semaphore nommu_region_sem;
 extern unsigned int kobjsize(const void *objp);
 #endif
 
+#ifdef CONFIG_ZSWAP
+extern int sysctl_zswap_compact;
+extern int sysctl_zswap_compaction_handler(struct ctl_table *table, int write,
+			void __user *buffer, size_t *length, loff_t *ppos);
+#endif
+
 /*
  * vm_flags in vm_area_struct, see mm_types.h.
  */
@@ -1260,7 +1266,8 @@ int set_page_dirty_lock(struct page *page);
 int clear_page_dirty_for_io(struct page *page);
 int get_cmdline(struct task_struct *task, char *buffer, int buflen);
 
-int vma_is_stack_for_task(struct vm_area_struct *vma, struct task_struct *t);
+extern struct task_struct *task_of_stack(struct task_struct *task,
+				struct vm_area_struct *vma, bool in_group);
 
 extern unsigned long move_page_tables(struct vm_area_struct *vma,
 		unsigned long old_addr, struct vm_area_struct *new_vma,
@@ -2052,6 +2059,7 @@ static inline struct page *follow_page(struct vm_area_struct *vma,
 #define FOLL_MIGRATION	0x400	/* wait for page to replace migration entry */
 #define FOLL_TRIED	0x800	/* a retry, previous pass started an IO */
 #define FOLL_COW	0x4000	/* internal GUP flag */
+#define FOLL_CMA	0x80000	/* migrate if the page is from cma pageblock */
 
 typedef int (*pte_fn_t)(pte_t *pte, pgtable_t token, unsigned long addr,
 			void *data);

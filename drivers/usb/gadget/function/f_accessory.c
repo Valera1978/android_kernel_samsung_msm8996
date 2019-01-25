@@ -42,6 +42,10 @@
 #include <linux/configfs.h>
 #include <linux/usb/composite.h>
 
+#ifdef CONFIG_USB_NOTIFY_PROC_LOG
+#include <linux/usblog_proc_notify.h>
+#endif
+
 #define MAX_INST_NAME_LEN        40
 #define BULK_BUFFER_SIZE    16384
 #define ACC_STRING_SIZE     256
@@ -805,10 +809,12 @@ static long acc_ioctl(struct file *fp, unsigned code, unsigned long value)
 
 static int acc_open(struct inode *ip, struct file *fp)
 {
-	printk(KERN_INFO "acc_open\n");
 	if (atomic_xchg(&_acc_dev->open_excl, 1))
+	{
+		printk(KERN_INFO "usb: acc_open_EBUSY\n");
 		return -EBUSY;
-
+	}
+	printk(KERN_INFO "usb: acc_open\n");
 	_acc_dev->disconnected = 0;
 	fp->private_data = _acc_dev;
 	return 0;
@@ -878,12 +884,6 @@ int acc_ctrlrequest(struct usb_composite_dev *cdev,
 	u16	w_length = le16_to_cpu(ctrl->wLength);
 	unsigned long flags;
 
-	/*
-	 * If instance is not created which is the case in power off charging
-	 * mode, dev will be NULL. Hence return error if it is the case.
-	 */
-	if (!dev)
-		return -ENODEV;
 /*
 	printk(KERN_INFO "acc_ctrlrequest "
 			"%02x.%02x v%04x i%04x l%u\n",
@@ -895,7 +895,11 @@ int acc_ctrlrequest(struct usb_composite_dev *cdev,
 		if (b_request == ACCESSORY_START) {
 			dev->start_requested = 1;
 			schedule_delayed_work(
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+				&dev->start_work, msecs_to_jiffies(200));
+#else
 				&dev->start_work, msecs_to_jiffies(10));
+#endif
 			value = 0;
 		} else if (b_request == ACCESSORY_SEND_STRING) {
 			dev->string_index = w_index;
@@ -1102,7 +1106,11 @@ acc_function_unbind(struct usb_configuration *c, struct usb_function *f)
 static void acc_start_work(struct work_struct *data)
 {
 	char *envp[2] = { "ACCESSORY=START", NULL };
+	printk(KERN_INFO "usb: Send uevent, ACCESSORY=START \n");
 	kobject_uevent_env(&acc_device.this_device->kobj, KOBJ_CHANGE, envp);
+#ifdef CONFIG_USB_NOTIFY_PROC_LOG
+	store_usblog_notify(NOTIFY_USBSTATE, (void *)envp[0], NULL);
+#endif
 }
 
 static int acc_hid_init(struct acc_hid_dev *hdev)

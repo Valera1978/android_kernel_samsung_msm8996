@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,6 +28,10 @@
 #include <linux/sw_sync.h>
 #include <linux/kmemleak.h>
 #include <asm/div64.h>
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+#include "../../../video/msm/mdss/samsung/ss_dsi_panel_common.h" /* UTIL HEADER */
+#endif
 
 #include <soc/qcom/event_timer.h>
 #include <linux/msm-bus.h>
@@ -992,6 +996,24 @@ skip_reconfigure:
 
 	mdss_mdp_pipe_unmap(pipe);
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	pr_debug("L_mixer:%d R_mixer:%d %s z:%d format:%d flag:0x%x src.x:%d y:%d w:%d h:%d "
+			"des_rect.x:%d y:%d w:%d h:%d mdss\n",
+			pipe->mixer_left ? pipe->mixer_left->num : -1,
+			pipe->mixer_right? pipe->mixer_right->num : -1,
+			pipe->ndx == BIT(0) ? "VG0" : pipe->ndx == BIT(1) ? "VG1" :
+			pipe->ndx == BIT(2) ? "VG2" : pipe->ndx == BIT(3) ? "RGB0" :
+			pipe->ndx == BIT(4) ? "RGB1" : pipe->ndx == BIT(5) ? "RGB2" :
+			pipe->ndx == BIT(6) ? "DMA0" : pipe->ndx == BIT(7) ? "DMA1":
+			pipe->ndx == BIT(8) ? "VG3" : pipe->ndx == BIT(9) ? "RGB3":
+			pipe->ndx == BIT(10) ? "CURSOR0" : pipe->ndx == BIT(11) ? "CURSOR1" : "MAX_SSPP",
+			pipe->mixer_stage - MDSS_MDP_STAGE_0,
+			pipe->src_fmt->format,
+			pipe->flags,
+			pipe->src.x, pipe->src.y, pipe->src.w, pipe->src.h,
+			pipe->dst.x, pipe->dst.y, pipe->dst.w, pipe->dst.h);
+#endif
+
 	return ret;
 exit_fail:
 	mdss_mdp_pipe_unmap(pipe);
@@ -1177,9 +1199,10 @@ static void __mdss_mdp_overlay_free_list_purge(struct msm_fb_data_type *mfd)
 	struct mdss_mdp_data *buf, *t;
 
 	pr_debug("purging fb%d free list\n", mfd->index);
-
+	MDSS_XLOG(mfd->index, 0x55);
 	list_for_each_entry_safe(buf, t, &mdp5_data->bufs_freelist, buf_list)
 		mdss_mdp_overlay_buf_free(mfd, buf);
+	MDSS_XLOG(mfd->index, 0xEE);
 }
 
 static void __overlay_pipe_cleanup(struct msm_fb_data_type *mfd,
@@ -1199,7 +1222,7 @@ static void __overlay_pipe_cleanup(struct msm_fb_data_type *mfd,
 		if (pipe->flags & MDP_SECURE_DISPLAY_OVERLAY_SESSION)
 			mdss_mdp_overlay_buf_free(mfd, buf);
 	}
-
+	MDSS_XLOG(mfd->index, 0xEE, pipe->num);
 	mdss_mdp_pipe_destroy(pipe);
 }
 
@@ -1373,7 +1396,7 @@ int mdss_mdp_overlay_start(struct msm_fb_data_type *mfd)
 			}
 		}
 	} else if (mdata->handoff_pending) {
-		pr_warn("fb%d: commit while splash handoff pending\n",
+		pr_err("fb%d: commit while splash handoff pending\n",
 				mfd->index);
 		return -EPERM;
 	}
@@ -1568,6 +1591,8 @@ static int __overlay_queue_pipes(struct msm_fb_data_type *mfd)
 		/* ensure pipes are reconfigured after power off/on */
 		if (ctl->play_cnt == 0)
 			pipe->params_changed++;
+		if (ctl->mixer_cfg_changed)
+			pipe->params_changed++;
 
 		if (buf && (buf->state == MDP_BUF_STATE_READY)) {
 			buf->state = MDP_BUF_STATE_ACTIVE;
@@ -1628,6 +1653,25 @@ static int __overlay_queue_pipes(struct msm_fb_data_type *mfd)
 
 			__unstage_pipe_and_clean_buf(mfd, pipe, buf);
 		}
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+		pr_debug("L_mixer:%d R_mixer:%d %s z:%d format:%d flag:0x%x src.x:%d y:%d w:%d h:%d "
+			"des_rect.x:%d y:%d w:%d h:%d mdss\n",
+			pipe->mixer_left ? pipe->mixer_left->num : -1,
+			pipe->mixer_right? pipe->mixer_right->num : -1,
+			pipe->ndx == BIT(0) ? "VG0" : pipe->ndx == BIT(1) ? "VG1" :
+			pipe->ndx == BIT(2) ? "VG2" : pipe->ndx == BIT(3) ? "RGB0" :
+			pipe->ndx == BIT(4) ? "RGB1" : pipe->ndx == BIT(5) ? "RGB2" :
+			pipe->ndx == BIT(6) ? "DMA0" : pipe->ndx == BIT(7) ? "DMA1":
+			pipe->ndx == BIT(8) ? "VG3" : pipe->ndx == BIT(9) ? "RGB3":
+			pipe->ndx == BIT(10) ? "CURSOR0" : pipe->ndx == BIT(11) ? "CURSOR1" : "MAX_SSPP",
+			pipe->mixer_stage - MDSS_MDP_STAGE_0,
+			pipe->src_fmt->format,
+			pipe->flags,
+			pipe->src.x, pipe->src.y, pipe->src.w, pipe->src.h,
+			pipe->dst.x, pipe->dst.y, pipe->dst.w, pipe->dst.h);
+#endif
+
 	}
 
 	return 0;
@@ -1755,7 +1799,7 @@ end:
 
 int mdss_mode_switch(struct msm_fb_data_type *mfd, u32 mode)
 {
-	struct mdss_rect l_roi  = {0}, r_roi = {0};
+	struct mdss_rect l_roi, r_roi;
 	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
 	struct mdss_mdp_ctl *sctl;
@@ -2867,6 +2911,8 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 	if (!ctl || !ctl->mixer_left)
 		return -ENODEV;
 
+	pr_debug("%s +\n", __func__);
+
 	ATRACE_BEGIN(__func__);
 	if (ctl->shared_lock) {
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_BEGIN);
@@ -3005,6 +3051,11 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 	}
 
 	mdss_fb_update_notify_update(mfd);
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	mdss_mdp_ctl_intf_event(mdp5_data->ctl, MDSS_SAMSUNG_EVENT_FRAME_UPDATE, NULL, false);
+#endif
+
 commit_fail:
 	ATRACE_BEGIN("overlay_cleanup");
 	mdss_mdp_overlay_cleanup(mfd, &mdp5_data->pipes_destroy);
@@ -3632,6 +3683,7 @@ int mdss_mdp_overlay_vsync_ctrl(struct msm_fb_data_type *mfd, int en)
 	}
 
 	pr_debug("fb%d vsync en=%d\n", mfd->index, en);
+	MDSS_XLOG(mfd->index, en);
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
 	if (en)
@@ -4745,6 +4797,12 @@ static int mdss_mdp_hw_cursor_pipe_update(struct msm_fb_data_type *mfd,
 	req->transp_mask = img->bg_color & ~(0xff << var->transp.offset);
 
 	if (mfd->cursor_buf && (cursor->set & FB_CUR_SETIMAGE)) {
+		if (img->width * img->height * 4 > cursor_frame_size) {
+			pr_err("cursor image size is too large\n");
+			ret = -EINVAL;
+			goto done;
+		}
+
 		ret = copy_from_user(mfd->cursor_buf, img->data,
 				     img->width * img->height * 4);
 		if (ret) {
@@ -5447,6 +5505,7 @@ static int __handle_overlay_prepare(struct msm_fb_data_type *mfd,
 
 	pr_debug("prepare fb%d num_ovs=%d\n", mfd->index, num_ovs);
 
+	MDSS_XLOG(mfd->index, num_ovs);
 	for (i = 0; i < num_ovs; i++) {
 		if (IS_RIGHT_MIXER_OV(ip_ovs[i].flags, ip_ovs[i].dst_rect.x,
 			left_lm_w))
@@ -5753,6 +5812,8 @@ static struct mdss_mdp_ctl *__mdss_mdp_overlay_ctl_init(
 	struct mdss_panel_data *pdata;
 	struct mdss_overlay_private *mdp5_data;
 
+	pr_info("%s ++\n", __func__);
+
 	if (!mfd)
 		return ERR_PTR(-EINVAL);
 
@@ -5805,6 +5866,7 @@ static struct mdss_mdp_ctl *__mdss_mdp_overlay_ctl_init(
 	}
 
 	mdp5_data->ctl = ctl;
+	pr_info("%s --	\n", __func__);
 error:
 	if (rc)
 		return ERR_PTR(rc);
@@ -5873,6 +5935,25 @@ static void mdss_mdp_handle_invalid_switch_state(struct msm_fb_data_type *mfd)
 	}
 }
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+struct samsung_display_driver_data* mdss_samsung_get_vdd(struct mdss_mdp_ctl *ctl)
+{
+	struct samsung_display_driver_data *vdd = NULL;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+
+	ctrl_pdata = container_of(ctl->panel_data, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+
+	vdd = check_valid_ctrl(ctrl_pdata);
+	if (IS_ERR_OR_NULL(vdd)) {
+		pr_err("%s: Invalid data ctrl : 0x%zx\n", __func__, (size_t)vdd);
+		return NULL;
+	}
+
+	return vdd;
+}
+#endif
+
 static int mdss_mdp_overlay_on(struct msm_fb_data_type *mfd)
 {
 	int rc;
@@ -5913,7 +5994,7 @@ static int mdss_mdp_overlay_on(struct msm_fb_data_type *mfd)
 	}
 
 	if (mdss_fb_is_power_on(mfd)) {
-		pr_debug("panel was never turned off\n");
+		pr_err("panel was never turned off\n");
 		rc = mdss_mdp_ctl_start(ctl, false);
 		goto panel_on;
 	}
@@ -6095,7 +6176,6 @@ ctl_stop:
 		u32 vsync_time = 1000 / (fps ? : DEFAULT_FRAME_RATE);
 
 		msleep(vsync_time);
-
 		mutex_lock(&mfd->mdp_sync_pt_data.sync_mutex);
 		retire_cnt = mdp5_data->retire_cnt;
 		mutex_unlock(&mfd->mdp_sync_pt_data.sync_mutex);
@@ -6337,11 +6417,9 @@ static void __vsync_retire_signal(struct msm_fb_data_type *mfd, int val)
 	mutex_lock(&mfd->mdp_sync_pt_data.sync_mutex);
 	if (mdp5_data->retire_cnt > 0) {
 		sw_sync_timeline_inc(mdp5_data->vsync_timeline, val);
-		mdp5_data->retire_cnt -= min(val, mdp5_data->retire_cnt);
-		pr_debug("Retire signaled! timeline val=%d remaining=%d\n",
-				mdp5_data->vsync_timeline->value,
-				mdp5_data->retire_cnt);
 
+		mdp5_data->retire_cnt -= min(val, mdp5_data->retire_cnt);
+		MDSS_XLOG(mdp5_data->retire_cnt, val, mdp5_data->vsync_timeline);
 		if (mdp5_data->retire_cnt == 0) {
 			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
 			mdp5_data->ctl->ops.remove_vsync_handler(mdp5_data->ctl,
@@ -6533,13 +6611,6 @@ int mdss_mdp_input_event_handler(struct msm_fb_data_type *mfd)
 	return rc;
 }
 
-static void mdss_mdp_signal_retire_fence(struct msm_fb_data_type *mfd,
-						int retire_cnt)
-{
-	__vsync_retire_signal(mfd, retire_cnt);
-	pr_debug("Signaled (%d) pending retire fence\n", retire_cnt);
-}
-
 int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 {
 	struct device *dev = mfd->fbi->dev;
@@ -6588,8 +6659,6 @@ int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 	mdp5_interface->splash_init_fnc = mdss_mdp_splash_init;
 	mdp5_interface->configure_panel = mdss_mdp_update_panel_info;
 	mdp5_interface->input_event_handler = mdss_mdp_input_event_handler;
-	mdp5_interface->signal_retire_fence = mdss_mdp_signal_retire_fence;
-	mdp5_interface->is_twm_en = NULL;
 
 	if (mfd->panel_info->type == WRITEBACK_PANEL) {
 		mdp5_interface->atomic_validate =
@@ -6790,18 +6859,14 @@ static int mdss_mdp_scaler_lut_init(struct mdss_data_type *mdata,
 	if (!mdata->scaler_off)
 		return -EFAULT;
 
-	mutex_lock(&mdata->scaler_off->scaler_lock);
-
 	qseed3_lut_tbl = &mdata->scaler_off->lut_tbl;
 	if ((lut_tbl->dir_lut_size !=
 		DIR_LUT_IDX * DIR_LUT_COEFFS * sizeof(uint32_t)) ||
 		(lut_tbl->cir_lut_size !=
 		 CIR_LUT_IDX * CIR_LUT_COEFFS * sizeof(uint32_t)) ||
 		(lut_tbl->sep_lut_size !=
-		SEP_LUT_IDX * SEP_LUT_COEFFS * sizeof(uint32_t))) {
-		mutex_unlock(&mdata->scaler_off->scaler_lock);
-		return -EINVAL;
-	}
+		 SEP_LUT_IDX * SEP_LUT_COEFFS * sizeof(uint32_t)))
+			return -EINVAL;
 
 	if (!qseed3_lut_tbl->dir_lut) {
 		qseed3_lut_tbl->dir_lut = devm_kzalloc(&mdata->pdev->dev,
@@ -6809,7 +6874,7 @@ static int mdss_mdp_scaler_lut_init(struct mdss_data_type *mdata,
 				GFP_KERNEL);
 		if (!qseed3_lut_tbl->dir_lut) {
 			ret = -ENOMEM;
-			goto err;
+			goto fail;
 		}
 	}
 
@@ -6819,7 +6884,7 @@ static int mdss_mdp_scaler_lut_init(struct mdss_data_type *mdata,
 				GFP_KERNEL);
 		if (!qseed3_lut_tbl->cir_lut) {
 			ret = -ENOMEM;
-			goto fail_free_dir_lut;
+			goto fail;
 		}
 	}
 
@@ -6829,52 +6894,44 @@ static int mdss_mdp_scaler_lut_init(struct mdss_data_type *mdata,
 				GFP_KERNEL);
 		if (!qseed3_lut_tbl->sep_lut) {
 			ret = -ENOMEM;
-			goto fail_free_cir_lut;
+			goto fail;
 		}
 	}
 
 	/* Invalidate before updating */
 	qseed3_lut_tbl->valid = false;
 
+
 	if (copy_from_user(qseed3_lut_tbl->dir_lut,
 				(void *)(unsigned long)lut_tbl->dir_lut,
 				lut_tbl->dir_lut_size)) {
 			ret = -EINVAL;
-			goto fail_free_sep_lut;
+			goto err;
 	}
 
 	if (copy_from_user(qseed3_lut_tbl->cir_lut,
 				(void *)(unsigned long)lut_tbl->cir_lut,
 				lut_tbl->cir_lut_size)) {
 			ret = -EINVAL;
-			goto fail_free_sep_lut;
+			goto err;
 	}
 
 	if (copy_from_user(qseed3_lut_tbl->sep_lut,
 				(void *)(unsigned long)lut_tbl->sep_lut,
 				lut_tbl->sep_lut_size)) {
 			ret = -EINVAL;
-			goto fail_free_sep_lut;
+			goto err;
 	}
 
 	qseed3_lut_tbl->valid = true;
-	mutex_unlock(&mdata->scaler_off->scaler_lock);
-
 	return ret;
 
-fail_free_sep_lut:
-	devm_kfree(&mdata->pdev->dev, qseed3_lut_tbl->sep_lut);
-fail_free_cir_lut:
-	devm_kfree(&mdata->pdev->dev, qseed3_lut_tbl->cir_lut);
-fail_free_dir_lut:
-	devm_kfree(&mdata->pdev->dev, qseed3_lut_tbl->dir_lut);
+fail:
+	kfree(qseed3_lut_tbl->dir_lut);
+	kfree(qseed3_lut_tbl->cir_lut);
+	kfree(qseed3_lut_tbl->sep_lut);
 err:
-	qseed3_lut_tbl->dir_lut = NULL;
-	qseed3_lut_tbl->cir_lut = NULL;
-	qseed3_lut_tbl->sep_lut = NULL;
 	qseed3_lut_tbl->valid = false;
-	mutex_unlock(&mdata->scaler_off->scaler_lock);
-
 	return ret;
 }
 

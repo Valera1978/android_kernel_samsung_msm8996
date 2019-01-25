@@ -3342,6 +3342,72 @@ void blk_post_runtime_resume(struct request_queue *q, int err)
 EXPORT_SYMBOL(blk_post_runtime_resume);
 #endif
 
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+/*********************************
+ * debugfs functions
+ **********************************/
+#ifdef CONFIG_DEBUG_FS
+#include <linux/debugfs.h>
+
+#define DBGFS_FUNC_DECL(name) \
+static int sio_open_##name(struct inode *inode, struct file *file) \
+{ \
+	return single_open(file, sio_show_##name, inode->i_private); \
+} \
+static const struct file_operations sio_fops_##name = { \
+	.owner		= THIS_MODULE, \
+	.open		= sio_open_##name, \
+	.llseek		= seq_lseek, \
+	.read		= seq_read, \
+	.release	= single_release, \
+}
+
+static int sio_show_patches(struct seq_file *s, void *p)
+{
+	extern char *__start_sio_patches;
+	extern char *__stop_sio_patches;
+	char **p_version_str;
+
+	for (p_version_str = &__start_sio_patches; p_version_str < &__stop_sio_patches; ++p_version_str)
+		seq_printf(s, "%s\n", *p_version_str);
+
+	return 0;
+}
+
+static struct dentry *sio_debugfs_root;
+
+DBGFS_FUNC_DECL(patches);
+
+SIO_PATCH_VERSION(SIO_patch_manager, 1, 0, "");
+
+static int __init sio_debugfs_init(void)
+{
+	if (!debugfs_initialized())
+		return -ENODEV;
+
+	sio_debugfs_root = debugfs_create_dir("sio", NULL);
+	if (!sio_debugfs_root)
+		return -ENOMEM;
+
+	debugfs_create_file("patches", 0400, sio_debugfs_root, NULL, &sio_fops_patches);
+
+	return 0;
+}
+
+static void __exit sio_debugfs_exit(void)
+{
+	debugfs_remove_recursive(sio_debugfs_root);
+}
+#else
+static int __init sio_debugfs_init(void)
+{
+	return 0;
+}
+
+static void __exit sio_debugfs_exit(void) { }
+#endif
+#endif
+
 int __init blk_dev_init(void)
 {
 	BUILD_BUG_ON(__REQ_NR_BITS > 8 *
@@ -3358,6 +3424,10 @@ int __init blk_dev_init(void)
 
 	blk_requestq_cachep = kmem_cache_create("blkdev_queue",
 			sizeof(struct request_queue), 0, SLAB_PANIC, NULL);
+
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	   sio_debugfs_init();
+#endif
 
 	return 0;
 }
@@ -3381,28 +3451,28 @@ blk_latency_hist_show(char* name, struct io_latency_state *s, char *buf,
 	u_int64_t average;
 
        num_elem = s->latency_elems;
-       if (num_elem > 0) {
+	if (num_elem > 0) {
 	       average = div64_u64(s->latency_sum, s->latency_elems);
-	       bytes_written += scnprintf(buf + bytes_written,
+		bytes_written += scnprintf(buf + bytes_written,
 			       buf_size - bytes_written,
 			       "IO svc_time %s Latency Histogram (n = %llu,"
 			       " average = %llu):\n", name, num_elem, average);
-	       for (i = 0;
-		    i < ARRAY_SIZE(latency_x_axis_us);
-		    i++) {
+		for (i = 0;
+		     i < ARRAY_SIZE(latency_x_axis_us);
+		     i++) {
 		       elem = s->latency_y_axis[i];
-		       pct = div64_u64(elem * 100, num_elem);
-		       bytes_written += scnprintf(buf + bytes_written,
-				       PAGE_SIZE - bytes_written,
+			pct = div64_u64(elem * 100, num_elem);
+			bytes_written += scnprintf(buf + bytes_written,
+						   PAGE_SIZE - bytes_written,
 				       "\t< %6lluus%15llu%15d%%\n",
-				       latency_x_axis_us[i],
-				       elem, pct);
-	       }
-	       /* Last element in y-axis table is overflow */
+						   latency_x_axis_us[i],
+						   elem, pct);
+		}
+		/* Last element in y-axis table is overflow */
 	       elem = s->latency_y_axis[i];
-	       pct = div64_u64(elem * 100, num_elem);
-	       bytes_written += scnprintf(buf + bytes_written,
-			       PAGE_SIZE - bytes_written,
+		pct = div64_u64(elem * 100, num_elem);
+		bytes_written += scnprintf(buf + bytes_written,
+					   PAGE_SIZE - bytes_written,
 			       "\t>=%6lluus%15llu%15d%%\n",
 			       latency_x_axis_us[i - 1], elem, pct);
 	}

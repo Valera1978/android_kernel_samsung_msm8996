@@ -866,7 +866,7 @@ retry:
 		}
 
 		if (io_data->aio) {
-			req = usb_ep_alloc_request(ep->ep, GFP_ATOMIC);
+			req = usb_ep_alloc_request(ep->ep, GFP_KERNEL);
 			if (unlikely(!req))
 				goto error_lock;
 

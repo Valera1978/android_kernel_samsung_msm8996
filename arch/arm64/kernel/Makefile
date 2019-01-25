@@ -46,6 +46,9 @@ ifeq ($(CONFIG_KVM),y)
 arm64-obj-$(CONFIG_HARDEN_BRANCH_PREDICTOR)	+= bpi.o
 endif
 
+arm64-obj-$(CONFIG_RKP_CFP_ROPP)	+= rkp_cfp.o
+arm64-obj-$(CONFIG_TIMA_RKP)            += rkp_entry.o
+
 obj-y					+= $(arm64-obj-y) vdso/
 obj-m					+= $(arm64-obj-m)
 head-y					:= head.o

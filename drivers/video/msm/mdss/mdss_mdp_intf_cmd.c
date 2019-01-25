@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,6 +22,9 @@
 #include "mdss_mdp_trace.h"
 #include "mdss_dsi_clk.h"
 #include <linux/interrupt.h>
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+#include "samsung/ss_dsi_panel_common.h"
+#endif
 
 #define MAX_RECOVERY_TRIALS 10
 #define MAX_SESSIONS 2
@@ -81,6 +84,7 @@ struct mdss_mdp_cmd_ctx {
 	struct work_struct pp_done_work;
 	struct work_struct early_wakeup_clk_work;
 	atomic_t pp_done_cnt;
+
 	struct completion rdptr_done;
 
 	/*
@@ -152,10 +156,8 @@ static inline u32 mdss_mdp_cmd_line_count(struct mdss_mdp_ctl *ctl)
 	mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_LEFT);
 	if (!mixer) {
 		mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_RIGHT);
-		if (!mixer) {
-			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
-			goto exit;
-		}
+		if (!mixer)
+			goto end;
 	}
 
 	init = mdss_mdp_pingpong_read(mixer->pingpong_base,
@@ -163,10 +165,8 @@ static inline u32 mdss_mdp_cmd_line_count(struct mdss_mdp_ctl *ctl)
 	height = mdss_mdp_pingpong_read(mixer->pingpong_base,
 		MDSS_MDP_REG_PP_SYNC_CONFIG_HEIGHT) & 0xffff;
 
-	if (height < init) {
-		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
-		goto exit;
-	}
+	if (height < init)
+		goto end;
 
 	cnt = mdss_mdp_pingpong_read(mixer->pingpong_base,
 		MDSS_MDP_REG_PP_INT_COUNT_VAL) & 0xffff;
@@ -176,10 +176,10 @@ static inline u32 mdss_mdp_cmd_line_count(struct mdss_mdp_ctl *ctl)
 	else
 		cnt -= init;
 
+end:
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 
 	pr_debug("cnt=%d init=%d height=%d\n", cnt, init, height);
-exit:
 	return cnt;
 }
 
@@ -203,9 +203,6 @@ static int mdss_mdp_tearcheck_enable(struct mdss_mdp_ctl *ctl, bool enable)
 
 	sctl = mdss_mdp_get_split_ctl(ctl);
 	te = &ctl->panel_data->panel_info.te;
-
-	pr_debug("%s: enable=%d\n", __func__, enable);
-
 	mdss_mdp_pingpong_write(mixer->pingpong_base,
 		MDSS_MDP_REG_PP_TEAR_CHECK_EN,
 		(te ? te->tear_check_en : 0) && enable);
@@ -339,10 +336,13 @@ static int mdss_mdp_cmd_tearcheck_setup(struct mdss_mdp_cmd_ctx *ctx,
 		bool locked)
 {
 	int rc = 0;
+	struct mdss_panel_info *pinfo;
 	struct mdss_mdp_mixer *mixer = NULL, *mixer_right = NULL;
 	struct mdss_mdp_ctl *ctl = ctx->ctl;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	u32 offset = 0;
+
+	pinfo = &ctl->panel_data->panel_info;
 
 	mixer = mdss_mdp_mixer_get(ctl, MDSS_MDP_MIXER_MUX_LEFT);
 	if (mixer) {
@@ -817,12 +817,12 @@ int mdss_mdp_resource_control(struct mdss_mdp_ctl *ctl, u32 sw_event)
 		break;
 	case MDP_RSRC_CTL_EVENT_EARLY_WAKE_UP:
 		/*
-		 * Cancel any work item pending and:
-		 * 1. If the current state is ON, stay in ON.
-		 * 2. If the current state is GATED, stay at GATED.
-		 * 3. If the current state is POWER-OFF, POWER-ON and
-		 *	schedule a work item to POWER-OFF if no
-		 *	kickoffs get scheduled.
+		  * Cancel any work item pending and:
+		  * 1. If the current state is ON, stay in ON.
+		  * 2. If the current state is GATED, stay at GATED.
+		  * 3. If the current state is POWER-OFF, POWER-ON and
+		  *  schedule a work item to POWER-OFF if no
+		  *  kickoffs get scheduled.
 		 */
 
 		/* if panels are off, do not process early wake up */
@@ -987,6 +987,9 @@ static void mdss_mdp_cmd_readptr_done(void *arg)
 		pr_err("invalid ctx\n");
 		return;
 	}
+
+	ATRACE_BEGIN(__func__);
+	ATRACE_END(__func__);
 
 	vsync_time = ktime_get();
 	ctl->vsync_cnt++;
@@ -1167,6 +1170,11 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 	struct mdss_mdp_cmd_ctx *ctx = ctl->intf_ctx[MASTER_CTX];
 	struct mdss_mdp_vsync_handler *tmp;
 	ktime_t vsync_time;
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	struct samsung_display_driver_data *vdd = samsung_get_vdd();
+	struct mdss_panel_data *pdata;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata;
+#endif
 	bool sync_ppdone;
 
 	if (!ctx) {
@@ -1190,7 +1198,6 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 		ctx->current_pp_num);
 	mdss_mdp_set_intr_callback_nosync(MDSS_MDP_IRQ_TYPE_PING_PONG_COMP,
 		ctx->current_pp_num, NULL, NULL);
-
 	MDSS_XLOG(ctl->num, atomic_read(&ctx->koff_cnt), ctx->current_pp_num);
 
 	/*
@@ -1200,6 +1207,7 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 	 */
 	sync_ppdone = mdss_mdp_cmd_do_notifier(ctx);
 
+	MDSS_XLOG(sync_ppdone, ctl->commit_in_progress);
 	if (atomic_add_unless(&ctx->koff_cnt, -1, 0)) {
 		if (atomic_read(&ctx->koff_cnt))
 			pr_err("%s: too many kickoffs=%d!\n", __func__,
@@ -1209,8 +1217,18 @@ static void mdss_mdp_cmd_pingpong_done(void *arg)
 			if (!ctl->commit_in_progress)
 				schedule_work(&ctx->pp_done_work);
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+			pdata = ctl->panel_data;
+			ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+						panel_data);
+			if (ctrl_pdata
+				&& !vdd->dtsi_data[ctrl_pdata->ndx].samsung_tcon_clk_on_support)
+				mdss_mdp_resource_control(ctl,
+					MDP_RSRC_CTL_EVENT_PP_DONE);
+#else
 			mdss_mdp_resource_control(ctl,
 				MDP_RSRC_CTL_EVENT_PP_DONE);
+#endif
 		}
 		wake_up_all(&ctx->pp_waitq);
 	} else {
@@ -1450,6 +1468,7 @@ static void pingpong_done_work(struct work_struct *work)
 	struct mdss_mdp_ctl *ctl = ctx->ctl;
 
 	if (ctl) {
+		MDSS_XLOG(atomic_read(&ctx->pp_done_cnt));
 		while (atomic_add_unless(&ctx->pp_done_cnt, -1, 0))
 			mdss_mdp_ctl_notify(ctx->ctl, MDP_NOTIFY_FRAME_DONE);
 
@@ -1537,6 +1556,7 @@ static void clk_ctrl_delayed_off_work(struct work_struct *work)
 			goto exit;
 		}
 	}
+	MDSS_XLOG(ctl->num, mdp5_data->resources_state, XLOG_FUNC_ENTRY);
 
 	if (ctx->autorefresh_state != MDP_AUTOREFRESH_OFF) {
 		/*
@@ -1572,6 +1592,8 @@ static void clk_ctrl_delayed_off_work(struct work_struct *work)
 	mdp5_data->resources_state = MDP_RSRC_CTL_STATE_OFF;
 
 exit:
+	MDSS_XLOG(ctl->num, mdp5_data->resources_state, XLOG_FUNC_EXIT);
+
 	/* do this at the end, so we can also protect the global power state*/
 	if ((ctl->mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY) ||
 	    is_pingpong_split(ctl->mfd))
@@ -1613,14 +1635,12 @@ static void clk_ctrl_gate_work(struct work_struct *work)
 	pr_debug("%s ctl:%d pwr_state:%s\n", __func__,
 		ctl->num, get_clk_pwr_state_name
 		(mdp5_data->resources_state));
-
 	mutex_lock(&ctl->rsrc_lock);
 	MDSS_XLOG(ctl->num, mdp5_data->resources_state, XLOG_FUNC_ENTRY);
 
 
 	if (ctl->mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY) {
 		mutex_lock(&cmd_clk_mtx);
-
 		if (mdss_mdp_get_split_display_ctls(&ctl, &sctl)) {
 			/* error when getting both controllers, just return */
 			pr_err("%s cannot get both cts for the split display\n",
@@ -1683,16 +1703,18 @@ static void clk_ctrl_gate_work(struct work_struct *work)
 	mdp5_data->resources_state = MDP_RSRC_CTL_STATE_GATE;
 
 exit:
+
+	MDSS_XLOG(ctl->num, mdp5_data->resources_state, XLOG_FUNC_EXIT);
+
 	/* unlock mutex needed for split display */
 	if ((ctl->mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY) ||
 	    is_pingpong_split(ctl->mfd))
 		mutex_unlock(&cmd_clk_mtx);
-
 	MDSS_XLOG(ctl->num, mdp5_data->resources_state, XLOG_FUNC_EXIT);
 	mutex_unlock(&ctl->rsrc_lock);
-
 	ATRACE_END(__func__);
 }
+
 
 static int mdss_mdp_setup_vsync(struct mdss_mdp_cmd_ctx *ctx,
 	bool enable)
@@ -1852,6 +1874,12 @@ int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 
 	clk_ctrl.state = MDSS_DSI_CLK_OFF;
 	clk_ctrl.client = DSI_CLK_REQ_MDP_CLIENT;
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	/* Turning off mdp to re-initialize the mdp */
+	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL, false);
+#endif
+
 	if (sctl) {
 		u32 flags = CTL_INTF_EVENT_FLAG_SKIP_BROADCAST;
 
@@ -1865,11 +1893,19 @@ int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_CLK_CTRL,
 		(void *)&clk_ctrl, CTL_INTF_EVENT_FLAG_SKIP_BROADCAST);
 
+	pr_info("%s ++\n", __func__);
+
 	pdata->panel_info.cont_splash_enabled = 0;
+
 	if (sctl)
 		sctl->panel_data->panel_info.cont_splash_enabled = 0;
 	else if (pdata->next && is_pingpong_split(ctl->mfd))
 		pdata->next->panel_info.cont_splash_enabled = 0;
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	/* Turning off panel to initialize panel init-seq at kick-off*/
+	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_OFF, NULL, false);
+#endif
 
 	return ret;
 }
@@ -1903,6 +1939,9 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 	struct mdss_panel_data *pdata;
 	unsigned long flags;
 	int rc = 0, te_irq;
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	struct samsung_display_driver_data *vdd = samsung_get_vdd();
+#endif
 
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[MASTER_CTX];
 	if (!ctx) {
@@ -1964,7 +2003,16 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 			MDSS_XLOG(0xbac);
 			mdss_fb_report_panel_dead(ctl->mfd);
 		} else if (ctx->pp_timeout_report_cnt == 0) {
-			MDSS_XLOG(0xbad);
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+			if (vdd->debug_data->panic_on_pptimeout) {
+				WARN(1, "cmd kickoff timed out (%d) ctl=%d\n", rc, ctl->num);
+				MDSS_XLOG(0xbad);
+				MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
+						"dsi1_ctrl", "dsi1_phy", "vbif", "vbif_nrt",
+						"dbg_bus", "vbif_dbg_bus", "panic");
+			} else
+#endif
+			pr_err("cmd kickoff timed out (%d) ctl=%d\n", rc, ctl->num);
 		} else if (ctx->pp_timeout_report_cnt == MAX_RECOVERY_TRIALS) {
 			MDSS_XLOG(0xbad2);
 			MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
@@ -2053,7 +2101,9 @@ static void mdss_mdp_cmd_dsc_reconfig(struct mdss_mdp_ctl *ctl)
 	if (pinfo->compression_mode != COMPRESSION_DSC)
 		return;
 
-	changed = ctl->mixer_left->roi_changed;
+	MDSS_XLOG(ctl->mixer_left->roi_changed, ctl->power_state);
+
+	changed = ctl->mixer_left->roi_changed || (ctl->power_state==MDSS_PANEL_POWER_LP1);
 	if (is_split_lm(ctl->mfd))
 		changed |= ctl->mixer_right->roi_changed;
 
@@ -2107,7 +2157,7 @@ static int mdss_mdp_cmd_panel_on(struct mdss_mdp_ctl *ctl,
 		sctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[SLAVE_CTX];
 
 	if (!__mdss_mdp_cmd_is_panel_power_on_interactive(ctx)) {
-		if (ctl->pending_mode_switch != SWITCH_RESOLUTION) {
+		if ((ctl->pending_mode_switch != SWITCH_RESOLUTION)||(ctl->switch_with_handoff)) {
 			rc = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_LINK_READY,
 					NULL, CTL_INTF_EVENT_FLAG_DEFAULT);
 			WARN(rc, "intf %d link ready error (%d)\n",
@@ -2212,7 +2262,6 @@ int mdss_mdp_cmd_set_autorefresh_mode(struct mdss_mdp_ctl *mctl, int frame_cnt)
 			rc = -EINVAL;
 			goto exit;
 		}
-
 		/*
 		 * actual enable will happen in commit context when
 		 * next update is kicked off.
@@ -2224,7 +2273,6 @@ int mdss_mdp_cmd_set_autorefresh_mode(struct mdss_mdp_ctl *mctl, int frame_cnt)
 		/* Cancel GATE Work Item */
 		if (cancel_work_sync(&ctx->gate_clk_work))
 			pr_debug("%s: gate work canceled\n", __func__);
-
 		/* Cancel OFF Work Item  */
 		if (cancel_delayed_work_sync(&ctx->delayed_off_clk_work))
 			pr_debug("%s: off work canceled\n", __func__);
@@ -2399,7 +2447,7 @@ static void mdss_mdp_cmd_wait4_autorefresh_pp(struct mdss_mdp_ctl *ctl)
 					"vbif", "dbg_bus", "vbif_dbg_bus",
 					"panic");
 			}
-		}
+ 		}
 	}
 }
 
@@ -2745,6 +2793,15 @@ static int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 		mctl = mdss_mdp_get_main_ctl(ctl);
 	mdss_mdp_cmd_dsc_reconfig(mctl);
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	/* send recovery pck before sending image date (for ESD recovery) */
+	mdss_mdp_ctl_intf_event(ctl, MDSS_SAMSUNG_EVENT_PANEL_ESD_RECOVERY,
+		NULL, CTL_INTF_EVENT_FLAG_SKIP_BROADCAST);
+	/* MULTI_RESOLUTION	*/
+	mdss_mdp_ctl_intf_event(ctl, MDSS_SAMSUNG_EVENT_MULTI_RESOLUTION,
+		NULL, CTL_INTF_EVENT_FLAG_DEFAULT);
+#endif
+
 	mdss_mdp_cmd_set_partial_roi(ctl);
 
 	/*
@@ -3003,12 +3060,11 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 		return 0;
 	}
 
-	pr_debug("%s: transition from %d --> %d\n", __func__,
-		ctx->panel_power_state, panel_power_state);
-
 	if (sctl)
 		sctx = (struct mdss_mdp_cmd_ctx *) sctl->intf_ctx[MASTER_CTX];
 
+	pr_info("%s: transition from %d --> %d\n", __func__,
+		ctx->panel_power_state, panel_power_state);
 	MDSS_XLOG(ctx->panel_power_state, panel_power_state);
 
 	mutex_lock(&ctl->offlock);
@@ -3181,6 +3237,11 @@ static int mdss_mdp_cmd_early_wake_up(struct mdss_mdp_ctl *ctl)
 	if ((curr_time - ctl->last_input_time) <
 			INPUT_EVENT_HANDLER_DELAY_USECS)
 		return 0;
+
+	if (ctl->panel_data->panel_info.cont_splash_enabled != 0) {
+		return 0;
+	}
+
 	ctl->last_input_time = curr_time;
 
 	ctx = (struct mdss_mdp_cmd_ctx *) ctl->intf_ctx[MASTER_CTX];
@@ -3247,6 +3308,7 @@ static int mdss_mdp_cmd_ctx_setup(struct mdss_mdp_ctl *ctl,
 
 	pr_debug("%s: ctx=%pK num=%d aux=%d\n", __func__, ctx,
 		default_pp_num, aux_pp_num);
+
 	MDSS_XLOG(ctl->num, atomic_read(&ctx->koff_cnt));
 
 	mdss_mdp_set_intr_callback(MDSS_MDP_IRQ_TYPE_PING_PONG_RD_PTR,
@@ -3288,6 +3350,14 @@ static int mdss_mdp_cmd_intfs_setup(struct mdss_mdp_ctl *ctl,
 			 * explictly call the restore function to enable
 			 * tearcheck logic.
 			 */
+			MDSS_XLOG(ctx->panel_power_state,atomic_read(&ctx->koff_cnt));
+			if(!__mdss_mdp_cmd_is_panel_power_on_interactive(ctx)) {
+				ret = wait_event_timeout(ctx->pp_waitq,
+							atomic_read(&ctx->koff_cnt) == 0,
+							KOFF_TIMEOUT);
+				if(ret <= 0)
+					pr_err("%s: wait4pingpong timed out", __func__);
+			}
 			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
 			mdss_mdp_cmd_restore(ctl, false);
 			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
@@ -3461,7 +3531,6 @@ static int mdss_mdp_cmd_reconfigure(struct mdss_mdp_ctl *ctl,
 			 * stream configs.
 			 */
 			mdss_mdp_cmd_dsc_reconfig(ctl);
-
 			/*
 			 * Make explicit cmd_panel_on call, when dynamic
 			 * resolution switch request comes before cont-splash
@@ -3481,7 +3550,6 @@ static int mdss_mdp_cmd_reconfigure(struct mdss_mdp_ctl *ctl,
 				}
 				ctl->switch_with_handoff = false;
 			}
-
 			mdss_mdp_ctl_stop(ctl, MDSS_PANEL_POWER_OFF);
 			mdss_mdp_ctl_intf_event(ctl,
 				MDSS_EVENT_DSI_DYNAMIC_SWITCH,
@@ -3523,4 +3591,3 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 
 	return 0;
 }
-

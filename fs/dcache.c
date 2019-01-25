@@ -42,6 +42,9 @@
 
 #include "internal.h"
 #include "mount.h"
+#ifdef CONFIG_RKP_NS_PROT
+u8 ns_prot = 0;
+#endif
 
 /*
  * Usage:
@@ -587,7 +590,7 @@ again:
 		spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
 		if (unlikely(dentry->d_lockref.count < 0)) {
 			spin_unlock(&parent->d_lock);
-			parent = NULL;
+		parent = NULL;
 		}
 	} else {
 		parent = NULL;
@@ -1858,7 +1861,7 @@ struct dentry *d_make_root(struct inode *root_inode)
 			d_instantiate(res, root_inode);
 		} else {
 			iput(root_inode);
-		}
+	}
 	}
 	return res;
 }
@@ -2978,7 +2981,11 @@ restart:
 			if (mnt != parent) {
 				dentry = ACCESS_ONCE(mnt->mnt_mountpoint);
 				mnt = parent;
+#ifdef CONFIG_RKP_NS_PROT
+				vfsmnt = mnt->mnt;
+#else
 				vfsmnt = &mnt->mnt;
+#endif
 				continue;
 			}
 			if (!error)
@@ -3510,6 +3517,9 @@ void __init vfs_caches_init(unsigned long mempages)
 	mnt_init();
 	bdev_cache_init();
 	chrdev_init();
+#ifdef CONFIG_RKP_NS_PROT
+	ns_prot = 1;
+#endif
 }
 
 void take_dentry_name_snapshot(struct name_snapshot *name, struct dentry *dentry)

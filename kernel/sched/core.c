@@ -78,6 +78,22 @@
 #include <linux/syscore_ops.h>
 #include <linux/list_sort.h>
 
+#include <linux/sched/sysctl.h>
+#include <linux/kernel.h>
+#include <linux/kthread.h>
+#include <linux/mutex.h>
+#include <linux/workqueue.h>
+#include <linux/cpufreq.h>
+#include <linux/platform_device.h>
+#include <linux/err.h>
+#include <linux/of.h>
+#include <linux/sysfs.h>
+#include <linux/types.h>
+#include <soc/qcom/scm.h>
+#include <linux/sec_class.h>
+#include <linux/sched/rt.h>
+#include <linux/cpumask.h>
+
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
@@ -89,12 +105,18 @@
 #include <asm/app_api.h>
 #endif
 
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/qcom/sec_debug.h>
+#endif
+
 #include "sched.h"
 #include "../workqueue_internal.h"
 #include "../smpboot.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
+
+#define HEAVY_TASK_LOAD_THRESHOLD 1000
 
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",
@@ -650,7 +672,7 @@ void resched_cpu(int cpu)
 
 	raw_spin_lock_irqsave(&rq->lock, flags);
 	if (cpu_online(cpu) || cpu == smp_processor_id())
-		resched_curr(rq);
+	resched_curr(rq);
 	raw_spin_unlock_irqrestore(&rq->lock, flags);
 }
 
@@ -6348,6 +6370,9 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
+#ifdef CONFIG_SEC_DEBUG
+		sec_debug_task_sched_log(cpu, rq->curr);
+#endif
 	} else
 		raw_spin_unlock_irq(&rq->lock);
 
@@ -10573,6 +10598,11 @@ void __init sched_init(void)
 {
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
+
+#ifdef CONFIG_SEC_DEBUG
+	sec_gaf_supply_rqinfo(offsetof(struct rq, curr),
+		offsetof(struct cfs_rq, rq));
+#endif
 
 	if (sched_enable_hmp)
 		pr_info("HMP scheduling enabled.\n");

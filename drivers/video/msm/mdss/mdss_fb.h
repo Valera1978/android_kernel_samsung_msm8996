@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -32,8 +32,8 @@
 #define MSM_FB_MAX_DEV_LIST 32
 
 #define MSM_FB_ENABLE_DBGFS
-#define WAIT_FENCE_FIRST_TIMEOUT (3 * MSEC_PER_SEC)
-#define WAIT_FENCE_FINAL_TIMEOUT (7 * MSEC_PER_SEC)
+#define WAIT_FENCE_FIRST_TIMEOUT (10 * MSEC_PER_SEC)
+#define WAIT_FENCE_FINAL_TIMEOUT (15 * MSEC_PER_SEC)
 #define WAIT_MAX_FENCE_TIMEOUT (WAIT_FENCE_FIRST_TIMEOUT + \
 					WAIT_FENCE_FINAL_TIMEOUT)
 #define WAIT_MIN_FENCE_TIMEOUT  (1)
@@ -233,9 +233,6 @@ struct msm_mdp_interface {
 				int dest_ctrl);
 	int (*input_event_handler)(struct msm_fb_data_type *mfd);
 	int (*pp_release_fnc)(struct msm_fb_data_type *mfd);
-	void (*signal_retire_fence)(struct msm_fb_data_type *mfd,
-					int retire_cnt);
-	bool (*is_twm_en)(void);
 	void *private1;
 };
 
@@ -369,6 +366,7 @@ struct msm_fb_data_type {
 	bool pending_switch;
 	struct mutex switch_lock;
 	struct input_handler *input_handler;
+	bool force_revalidate;
 };
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)

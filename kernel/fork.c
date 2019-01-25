@@ -668,20 +668,20 @@ static inline void __mmput(struct mm_struct *mm)
 {
 	VM_BUG_ON(atomic_read(&mm->mm_users));
 
-	uprobe_clear_state(mm);
-	exit_aio(mm);
-	ksm_exit(mm);
-	khugepaged_exit(mm); /* must run before exit_mmap */
-	exit_mmap(mm);
-	set_mm_exe_file(mm, NULL);
-	if (!list_empty(&mm->mmlist)) {
-		spin_lock(&mmlist_lock);
-		list_del(&mm->mmlist);
-		spin_unlock(&mmlist_lock);
-	}
-	if (mm->binfmt)
-		module_put(mm->binfmt->module);
-	mmdrop(mm);
+		uprobe_clear_state(mm);
+		exit_aio(mm);
+		ksm_exit(mm);
+		khugepaged_exit(mm); /* must run before exit_mmap */
+		exit_mmap(mm);
+		set_mm_exe_file(mm, NULL);
+		if (!list_empty(&mm->mmlist)) {
+			spin_lock(&mmlist_lock);
+			list_del(&mm->mmlist);
+			spin_unlock(&mmlist_lock);
+		}
+		if (mm->binfmt)
+			module_put(mm->binfmt->module);
+		mmdrop(mm);
 }
 
 /*
@@ -699,20 +699,6 @@ int mmput(struct mm_struct *mm)
 	return mm_freed;
 }
 EXPORT_SYMBOL_GPL(mmput);
-
-static void mmput_async_fn(struct work_struct *work)
-{
-	struct mm_struct *mm = container_of(work, struct mm_struct, async_put_work);
-	__mmput(mm);
-}
-
-void mmput_async(struct mm_struct *mm)
-{
-	if (atomic_dec_and_test(&mm->mm_users)) {
-		INIT_WORK(&mm->async_put_work, mmput_async_fn);
-		schedule_work(&mm->async_put_work);
-	}
-}
 
 void set_mm_exe_file(struct mm_struct *mm, struct file *new_exe_file)
 {
@@ -1210,6 +1196,15 @@ static void posix_cpu_timers_init(struct task_struct *tsk)
 	INIT_LIST_HEAD(&tsk->cpu_timers[2]);
 }
 
+#ifdef CONFIG_RKP_KDP
+void rkp_assign_pgd(struct task_struct *p)
+{
+	u64 pgd;
+	pgd = (u64)(p->mm ? p->mm->pgd :swapper_pg_dir);
+	rkp_call(RKP_CMDID(0x43),(u64)p->cred, (u64)pgd,0,0,0);
+}
+#endif /*CONFIG_RKP_KDP*/
+
 static inline void
 init_task_pid(struct task_struct *task, enum pid_type type, struct pid *pid)
 {
@@ -1591,7 +1586,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	trace_task_newtask(p, clone_flags);
 	uprobe_copy_process(p, clone_flags);
-
+#ifdef CONFIG_RKP_KDP
+	if(rkp_cred_enable)
+		rkp_assign_pgd(p);
+#endif/*CONFIG_RKP_KDP*/
 	return p;
 
 bad_fork_free_pid:

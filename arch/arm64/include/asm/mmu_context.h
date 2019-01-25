@@ -56,11 +56,18 @@ static inline void cpu_set_reserved_ttbr0(void)
 {
 	unsigned long ttbr = virt_to_phys(empty_zero_page);
 
+#ifndef CONFIG_TIMA_RKP
 	asm(
 	"	msr	ttbr0_el1, %0			// set TTBR0\n"
 	"	isb"
 	:
 	: "r" (ttbr));
+#else
+	rkp_call(RKP_EMULT_TTBR0, (unsigned long)ttbr, 0, 0, 0, 0);
+	asm(
+	"	isb"
+	::);
+#endif
 }
 
 static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)

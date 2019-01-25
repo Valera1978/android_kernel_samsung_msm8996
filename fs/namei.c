@@ -922,11 +922,19 @@ static int follow_up_rcu(struct path *path)
 	struct dentry *mountpoint;
 
 	parent = mnt->mnt_parent;
+#ifdef CONFIG_RKP_NS_PROT
+	if (parent->mnt == path->mnt)
+#else
 	if (&parent->mnt == path->mnt)
+#endif
 		return 0;
 	mountpoint = mnt->mnt_mountpoint;
 	path->dentry = mountpoint;
+#ifdef CONFIG_RKP_NS_PROT
+	path->mnt = parent->mnt;
+#else
 	path->mnt = &parent->mnt;
+#endif
 	return 1;
 }
 
@@ -952,13 +960,21 @@ int follow_up(struct path *path)
 		read_sequnlock_excl(&mount_lock);
 		return 0;
 	}
+#ifdef CONFIG_RKP_NS_PROT
+	mntget(parent->mnt);
+#else
 	mntget(&parent->mnt);
+#endif
 	mountpoint = dget(mnt->mnt_mountpoint);
 	read_sequnlock_excl(&mount_lock);
 	dput(path->dentry);
 	path->dentry = mountpoint;
 	mntput(path->mnt);
+#ifdef CONFIG_RKP_NS_PROT
+	path->mnt = parent->mnt;
+#else
 	path->mnt = &parent->mnt;
+#endif
 	return 1;
 }
 EXPORT_SYMBOL(follow_up);
@@ -1160,8 +1176,13 @@ static bool __follow_mount_rcu(struct nameidata *nd, struct path *path,
 		mounted = __lookup_mnt(path->mnt, path->dentry);
 		if (!mounted)
 			break;
+#ifdef CONFIG_RKP_NS_PROT
+		path->mnt = mounted->mnt;
+		path->dentry = mounted->mnt->mnt_root;
+#else
 		path->mnt = &mounted->mnt;
 		path->dentry = mounted->mnt.mnt_root;
+#endif
 		nd->flags |= LOOKUP_JUMPED;
 		nd->seq = read_seqcount_begin(&path->dentry->d_seq);
 		/*
@@ -1211,8 +1232,13 @@ static int follow_dotdot_rcu(struct nameidata *nd)
 		mounted = __lookup_mnt(nd->path.mnt, nd->path.dentry);
 		if (!mounted)
 			break;
+#ifdef CONFIG_RKP_NS_PROT
+		nd->path.mnt = mounted->mnt;
+		nd->path.dentry = mounted->mnt->mnt_root;
+#else
 		nd->path.mnt = &mounted->mnt;
 		nd->path.dentry = mounted->mnt.mnt_root;
+#endif
 		inode = nd->path.dentry->d_inode;
 		nd->seq = read_seqcount_begin(&nd->path.dentry->d_seq);
 		if (read_seqretry(&mount_lock, nd->m_seq))

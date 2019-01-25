@@ -23,6 +23,7 @@
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 
 static struct msm_sensor_init_t *s_init;
+struct class *camera_class;
 static struct v4l2_file_operations msm_sensor_init_v4l2_subdev_fops;
 /* Static function declaration */
 static long msm_sensor_init_subdev_ioctl(struct v4l2_subdev *sd,
@@ -167,10 +168,17 @@ static long msm_sensor_init_subdev_fops_ioctl(
 static int __init msm_sensor_init_module(void)
 {
 	int ret = 0;
+	camera_class = class_create(THIS_MODULE, "camera");
+	if (IS_ERR(camera_class))
+	    pr_err("failed to create device cam_dev_rear!\n");
+
 	/* Allocate memory for msm_sensor_init control structure */
 	s_init = kzalloc(sizeof(struct msm_sensor_init_t), GFP_KERNEL);
-	if (!s_init)
+	if (!s_init) {
+		class_destroy(camera_class);
+		pr_err("failed: no memory s_init %pK", NULL);
 		return -ENOMEM;
+	}
 
 	CDBG("MSM_SENSOR_INIT_MODULE %pK", NULL);
 
@@ -208,6 +216,7 @@ static int __init msm_sensor_init_module(void)
 error:
 	mutex_destroy(&s_init->imutex);
 	kfree(s_init);
+	class_destroy(camera_class);
 	return ret;
 }
 

@@ -1,7 +1,7 @@
 /*
  * MDSS MDP Interface (used by framebuffer core)
  *
- * Copyright (c) 2007-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2007-2017, The Linux Foundation. All rights reserved.
  * Copyright (C) 2007 Google Incorporated
  *
  * This software is licensed under the terms of the GNU General Public
@@ -58,6 +58,10 @@
 
 #include "mdss_mdp_trace.h"
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+#include "samsung/ss_dsi_panel_common.h"
+#endif
+
 #define AXI_HALT_TIMEOUT_US	0x4000
 #define AUTOSUSPEND_TIMEOUT_MS	200
 #define DEFAULT_MDP_PIPE_WIDTH	2048
@@ -99,7 +103,7 @@ static struct mdss_panel_intf pan_types[] = {
 	{"edp", MDSS_PANEL_INTF_EDP},
 	{"hdmi", MDSS_PANEL_INTF_HDMI},
 };
-static char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
+char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
 
 struct mdss_hw mdss_mdp_hw = {
 	.hw_ndx = MDSS_HW_MDP,
@@ -782,7 +786,7 @@ void mdss_mdp_irq_clear(struct mdss_data_type *mdata,
 
 int mdss_mdp_irq_enable(u32 intr_type, u32 intf_num)
 {
-	int irq_idx = 0;
+	int irq_idx, idx;
 	unsigned long irq_flags;
 	int ret = 0;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
@@ -801,7 +805,7 @@ int mdss_mdp_irq_enable(u32 intr_type, u32 intf_num)
 	spin_lock_irqsave(&mdp_lock, irq_flags);
 	if (mdata->mdp_irq_mask[irq.reg_idx] & irq.irq_mask) {
 		pr_warn("MDSS MDP IRQ-0x%x is already set, mask=%x\n",
-				irq.irq_mask, mdata->mdp_irq_mask[irq.reg_idx]);
+				irq.irq_mask, mdata->mdp_irq_mask[idx]);
 		ret = -EBUSY;
 	} else {
 		pr_debug("MDP IRQ mask old=%x new=%x\n",
@@ -820,6 +824,8 @@ int mdss_mdp_hist_irq_enable(u32 irq)
 {
 	int ret = 0;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	MDSS_XLOG(irq, mdata->mdp_hist_irq_mask, 0x1111); /* Temp log for case 02160908 */
 
 	if (mdata->mdp_hist_irq_mask & irq) {
 		pr_warn("MDSS MDP Hist IRQ-0x%x is already set, mask=%x\n",
@@ -903,6 +909,8 @@ void mdss_mdp_intr_check_and_clear(u32 intr_type, u32 intf_num)
 void mdss_mdp_hist_irq_disable(u32 irq)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
+
+	MDSS_XLOG(irq, mdata->mdp_hist_irq_mask, 0x1111); /* Temp log for case 02160908 */
 
 	if (!(mdata->mdp_hist_irq_mask & irq)) {
 		pr_warn("MDSS MDP IRQ-%x is NOT set, mask=%x\n",
@@ -1167,7 +1175,6 @@ unsigned long mdss_mdp_get_clk_rate(u32 clk_idx, bool locked)
 		if (!locked)
 			mutex_unlock(&mdp_clk_lock);
 	}
-
 	return clk_rate;
 }
 
@@ -1763,12 +1770,15 @@ static void mdss_mdp_hw_rev_caps_init(struct mdss_data_type *mdata)
 	mdata->hflip_buffer_reused = true;
 	/* prevent disable of prefill calculations */
 	mdata->min_prefill_lines = 0xffff;
-	/* clock gating feature is disabled by default */
-	mdata->enable_gate = false;
+	/* clock gating feature is enabled by default */
+	mdata->enable_gate = true;
+	mdata->wait4autorefresh = false;
+	mdata->serialize_wait4pp = false;
 	mdata->pixel_ram_size = 0;
 	mem_protect_sd_ctrl_id = MEM_PROTECT_SD_CTRL_FLAT;
 
 	mdss_mdp_hw_rev_debug_caps_init(mdata);
+	mdss_set_quirk(mdata, MDSS_QUIRK_AUTOREFRESH);
 
 	switch (mdata->mdp_rev) {
 	case MDSS_MDP_HW_REV_107:
@@ -2080,8 +2090,6 @@ static u32 mdss_mdp_scaler_init(struct mdss_data_type *mdata,
 		if (ret)
 			return -EINVAL;
 	}
-
-	mutex_init(&mdata->scaler_off->scaler_lock);
 
 	return 0;
 }
@@ -2418,7 +2426,7 @@ ssize_t mdss_mdp_show_capabilities(struct device *dev,
 	if (mdata->has_separate_rotator)
 		SPRINT(" separate_rotator");
 	if (mdss_has_quirk(mdata, MDSS_QUIRK_HDR_SUPPORT_ENABLED))
-		SPRINT(" hdr");
+		SPRINT(" hdr");		
 	SPRINT("\n");
 #undef SPRINT
 
@@ -2588,12 +2596,6 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 	mdss_res->mdss_util->panel_intf_type = mdss_panel_intf_type;
 	mdss_res->mdss_util->panel_intf_status = mdss_panel_get_intf_status;
 
-	if (mdss_res->mdss_util->param_check(mdss_mdp_panel)) {
-		mdss_res->mdss_util->display_disabled = true;
-		mdss_res->mdss_util->mdp_probe_done = true;
-		return 0;
-	}
-
 	rc = msm_dss_ioremap_byname(pdev, &mdata->mdss_io, "mdp_phys");
 	if (rc) {
 		pr_err("unable to map MDP base\n");
@@ -2618,6 +2620,13 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 	else
 		pr_debug("MDSS VBIF NRT HW Base addr=%pK len=0x%x\n",
 			mdata->vbif_nrt_io.base, mdata->vbif_nrt_io.len);
+
+	rc = msm_dss_ioremap_byname(pdev, &mdata->mmss_cc_io, "mmss_cc");
+	if (rc)
+		pr_debug("unable to map MMSS CC\n");
+	else
+		pr_debug("MMSS CC Base addr=%p len=0x%x\n",
+			mdata->mmss_cc_io.base, mdata->mmss_cc_io.len);
 
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
@@ -2777,6 +2786,10 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 			mdss_mdp_footswitch_ctrl_splash(true);
 	}
 
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (!mdss_panel_attached(DISPLAY_1) && !mdss_panel_attached(DISPLAY_2))
+		mdata->handoff_pending = false;
+#endif
 	mdp_intr_cb  = kcalloc(ARRAY_SIZE(mdp_irq_map),
 			sizeof(struct intr_callback), GFP_KERNEL);
 	if (mdp_intr_cb == NULL)
@@ -2786,6 +2799,11 @@ static int mdss_mdp_probe(struct platform_device *pdev)
 			sizeof(u32), GFP_KERNEL);
 	if (mdss_res->mdp_irq_mask == NULL)
 		return -ENOMEM;
+
+#if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
+	if (!mdss_panel_attached(DISPLAY_1) && !mdss_panel_attached(DISPLAY_2))
+		mdata->handoff_pending = false;
+#endif
 
 	pr_info("mdss version = 0x%x, bootloader display is %s, num %d, intf_sel=0x%08x\n",
 		mdata->mdp_rev, num_of_display_on ? "on" : "off",
@@ -4788,6 +4806,7 @@ static void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on)
 	if (on) {
 		if (!mdata->fs_ena) {
 			pr_debug("Enable MDP FS\n");
+			MDSS_XLOG(1);
 			if (mdata->venus) {
 				ret = regulator_enable(mdata->venus);
 				if (ret)
@@ -4808,6 +4827,7 @@ static void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on)
 	} else {
 		if (mdata->fs_ena) {
 			pr_debug("Disable MDP FS\n");
+			MDSS_XLOG(0);
 			active_cnt = atomic_read(&mdata->active_intf_cnt);
 			if (active_cnt != 0) {
 				/*
@@ -4830,6 +4850,7 @@ static void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on)
 		}
 		mdata->fs_ena = false;
 	}
+	MDSS_XLOG(on, mdata->fs_ena,mdata->idle_pc,mdata->en_svs_high,0x2222);
 }
 
 int mdss_mdp_secure_display_ctrl(struct mdss_data_type *mdata,

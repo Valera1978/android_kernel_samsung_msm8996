@@ -18,8 +18,12 @@
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
 
+#ifdef CONFIG_MUIC_UNIVERSAL_SM5705_AFC
+#include <linux/muic/muic_afc.h>
+int32_t afc_checked_for_camera = 0;
+#endif
 #undef CDBG
-#define CDBG(fmt, args...) pr_debug(fmt, ##args)
+#define CDBG(fmt, args...) pr_err(fmt, ##args)
 
 static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl;
 static struct msm_camera_i2c_fn_t msm_sensor_secure_func_tbl;

@@ -200,6 +200,7 @@ static inline void snd_leave_user(mm_segment_t fs)
 
 int snd_pcm_info(struct snd_pcm_substream *substream, struct snd_pcm_info *info)
 {
+	struct snd_pcm_runtime *runtime;
 	struct snd_pcm *pcm = substream->pcm;
 	struct snd_pcm_str *pstr = substream->pstr;
 
@@ -215,7 +216,12 @@ int snd_pcm_info(struct snd_pcm_substream *substream, struct snd_pcm_info *info)
 	info->subdevices_count = pstr->substream_count;
 	info->subdevices_avail = pstr->substream_count - pstr->substream_opened;
 	strlcpy(info->subname, substream->name, sizeof(info->subname));
-
+	runtime = substream->runtime;
+	/* AB: FIXME!!! This is definitely nonsense */
+	if (runtime) {
+		info->sync = runtime->sync;
+		substream->ops->ioctl(substream, SNDRV_PCM_IOCTL1_INFO, info);
+	}
 	return 0;
 }
 
@@ -2737,7 +2743,6 @@ static int snd_pcm_sync_ptr(struct snd_pcm_substream *substream,
 	sync_ptr.s.status.hw_ptr = status->hw_ptr;
 	sync_ptr.s.status.tstamp = status->tstamp;
 	sync_ptr.s.status.suspended_state = status->suspended_state;
-	sync_ptr.s.status.audio_tstamp = status->audio_tstamp;
 	snd_pcm_stream_unlock_irq(substream);
 	if (copy_to_user(_sync_ptr, &sync_ptr, sizeof(sync_ptr)))
 		return -EFAULT;
@@ -3450,7 +3455,7 @@ int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 					 area,
 					 substream->runtime->dma_area,
 					 substream->runtime->dma_addr,
-					 substream->runtime->dma_bytes);
+					 area->vm_end - area->vm_start);
 #elif defined(CONFIG_MIPS) && defined(CONFIG_DMA_NONCOHERENT)
 	if (substream->dma_buffer.dev.type == SNDRV_DMA_TYPE_DEV &&
 	    !plat_device_is_coherent(substream->dma_buffer.dev.dev))

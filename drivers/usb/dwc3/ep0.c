@@ -267,7 +267,7 @@ out:
 	return ret;
 }
 
-void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
+static void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
 {
 	struct dwc3_ep		*dep;
 
@@ -424,6 +424,7 @@ static int dwc3_ep0_handle_status(struct dwc3 *dwc,
 	dwc->ep0_usb_req.request.length = sizeof(*response_pkt);
 	dwc->ep0_usb_req.request.buf = dwc->setup_buf;
 	dwc->ep0_usb_req.request.complete = dwc3_ep0_status_cmpl;
+	dwc->ep0_usb_req.request.dma = DMA_ERROR_CODE;
 
 	return __dwc3_gadget_ep0_queue(dep, &dwc->ep0_usb_req);
 }
@@ -598,30 +599,22 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 		break;
 
 	case USB_STATE_ADDRESS:
-		/*
-		 * If tx-fifo-resize flag is not set for the controller, then
-		 * do not clear existing allocated TXFIFO since we do not
-		 * allocate it again in dwc3_gadget_resize_tx_fifos
-		 */
-		if (dwc->needs_fifo_resize) {
-			/* Read ep0IN related TXFIFO size */
-			dwc->last_fifo_depth = (dwc3_readl(dwc->regs,
-						DWC3_GTXFIFOSIZ(0)) & 0xFFFF);
-			/* Clear existing TXFIFO for all IN eps except ep0 */
-			for (num = 0; num < dwc->num_in_eps; num++) {
-				dep = dwc->eps[(num << 1) | 1];
-				if (num) {
-					dwc3_writel(dwc->regs,
-						DWC3_GTXFIFOSIZ(num), 0);
-					dep->fifo_depth = 0;
-				} else {
-					dep->fifo_depth = dwc->last_fifo_depth;
-				}
-
-				dev_dbg(dwc->dev, "%s(): %s fifo_depth:%x\n",
-					__func__, dep->name, dep->fifo_depth);
-				dbg_event(0xFF, "fifo_reset", dep->number);
+		/* Read ep0IN related TXFIFO size */
+		dwc->last_fifo_depth = (dwc3_readl(dwc->regs,
+					DWC3_GTXFIFOSIZ(0)) & 0xFFFF);
+		/* Clear existing allocated TXFIFO for all IN eps except ep0 */
+		for (num = 0; num < dwc->num_in_eps; num++) {
+			dep = dwc->eps[(num << 1) | 1];
+			if (num) {
+				dwc3_writel(dwc->regs, DWC3_GTXFIFOSIZ(num), 0);
+				dep->fifo_depth = 0;
+			} else {
+				dep->fifo_depth = dwc->last_fifo_depth;
 			}
+
+			dev_dbg(dwc->dev, "%s(): %s dep->fifo_depth:%x\n",
+					__func__, dep->name, dep->fifo_depth);
+			dbg_event(0xFF, "fifo_reset", dep->number);
 		}
 
 		ret = dwc3_ep0_delegate_req(dwc, ctrl);
@@ -662,7 +655,36 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 	}
 	return ret;
 }
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+static int dwc3_ep0_set_interface(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
+{
+	u32 alt_setting;
+#if 0
+	enum usb_device_state state = dwc->gadget.state;
+#endif
+	int ret;
 
+	alt_setting = le16_to_cpu(ctrl->wValue);
+
+	ret = dwc3_ep0_delegate_req(dwc, ctrl);
+#if 0
+	switch (state) {
+
+	case USB_STATE_CONFIGURED:
+		/* if the alt_setting matches and the alt_setting is non zero */
+		if (alt_setting && (!ret || (ret == USB_GADGET_DELAYED_STATUS))) {
+			dwc->resize_fifos = true;
+			dev_dbg(dwc->dev, "resize fifos flag SET\n");
+		}
+		break;
+
+	default:
+		dev_err(dwc->dev, "default case\n");
+	}
+#endif
+	return ret;
+}
+#endif
 static void dwc3_ep0_set_sel_cmpl(struct usb_ep *ep, struct usb_request *req)
 {
 	struct dwc3_ep	*dep = to_dwc3_ep(ep);
@@ -740,6 +762,7 @@ static int dwc3_ep0_set_sel(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 	dwc->ep0_usb_req.request.length = dep->endpoint.maxpacket;
 	dwc->ep0_usb_req.request.buf = dwc->setup_buf;
 	dwc->ep0_usb_req.request.complete = dwc3_ep0_set_sel_cmpl;
+	dwc->ep0_usb_req.request.dma = DMA_ERROR_CODE;
 
 	return __dwc3_gadget_ep0_queue(dep, &dwc->ep0_usb_req);
 }
@@ -789,6 +812,13 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 		break;
 	case USB_REQ_SET_CONFIGURATION:
 		dwc3_trace(trace_dwc3_ep0, "USB_REQ_SET_CONFIGURATION\n");
+#ifdef CONFIG_USB_CHARGING_EVENT
+		if(dwc->gadget.speed == USB_SPEED_SUPER)
+			dwc->vbus_current = USB_CURRENT_SUPER_SPEED; 
+		else
+			dwc->vbus_current= USB_CURRENT_HIGH_SPEED;
+		schedule_work(&dwc->set_vbus_current_work);
+#endif
 		ret = dwc3_ep0_set_config(dwc, ctrl);
 		break;
 	case USB_REQ_SET_SEL:
@@ -799,6 +829,12 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 		dwc3_trace(trace_dwc3_ep0, "USB_REQ_SET_ISOCH_DELAY\n");
 		ret = dwc3_ep0_set_isoch_delay(dwc, ctrl);
 		break;
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	case USB_REQ_SET_INTERFACE:
+		dev_vdbg(dwc->dev, "USB_REQ_SET_INTERFACE\n");
+		ret = dwc3_ep0_set_interface(dwc, ctrl);
+		break;
+#endif
 	default:
 		dwc3_trace(trace_dwc3_ep0, "Forwarding to gadget driver\n");
 		ret = dwc3_ep0_delegate_req(dwc, ctrl);
@@ -1119,21 +1155,8 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 
 	switch (event->status) {
 	case DEPEVT_STATUS_CONTROL_DATA:
-		dep->dbg_ep_events.control_data++;
-
-		/*
-		 * When we issue a STALL and RESTART of EP0 OUT, then
-		 * ep0_next_event is set as DWC3_EP0_COMPLETE and we wait for
-		 * the next setup packet. We will ignore a XferNotReady (DATA)
-		 * event until setup packet arrives, so as to avoid HW latency
-		 * issues.
-		 */
-		if (dwc->ep0_next_event == DWC3_EP0_COMPLETE) {
-			dwc3_trace(trace_dwc3_ep0, "Ignore Control Data");
-			return;
-		}
-
 		dwc3_trace(trace_dwc3_ep0, "Control Data");
+		dep->dbg_ep_events.control_data++;
 
 		/*
 		 * We already have a DATA transfer in the controller's cache,

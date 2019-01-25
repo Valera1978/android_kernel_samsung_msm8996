@@ -61,6 +61,10 @@ unsigned long __stack_chk_guard __read_mostly;
 EXPORT_SYMBOL(__stack_chk_guard);
 #endif
 
+#ifdef CONFIG_RKP_CFP_ROPP
+#include <linux/rkp_cfp.h>
+#endif
+
 /*
  * Function pointers to optional machine specific functions
  */
@@ -358,6 +362,9 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 		p->thread.cpu_context.x19 = stack_start;
 		p->thread.cpu_context.x20 = stk_sz;
 	}
+#ifdef CONFIG_RKP_CFP_ROPP
+	rkp_cfp_ropp_change_keys(p);
+#endif
 	p->thread.cpu_context.pc = (unsigned long)ret_from_fork;
 	p->thread.cpu_context.sp = (unsigned long)childregs;
 	p->thread.tp_value = tls;

@@ -228,8 +228,7 @@ static void sdio_enable_vendor_specific_settings(struct mmc_card *card)
 	u8 settings;
 
 	if (mmc_enable_qca6574_settings(card) ||
-		mmc_enable_qca9377_settings(card) ||
-		mmc_enable_qca9379_settings(card)) {
+		mmc_enable_qca9377_settings(card)) {
 		ret = mmc_io_rw_direct(card, 1, 0, 0xF2, 0x0F, NULL);
 		if (ret) {
 			pr_crit("%s: failed to write to fn 0xf2 %d\n",
@@ -743,7 +742,7 @@ try_again:
 	 */
 	if (!powered_resume && (rocr & ocr & R4_18V_PRESENT)) {
 		err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180,
-					ocr_card);
+					ocr);
 		if (err == -EAGAIN) {
 			sdio_reset(host);
 			mmc_go_idle(host);

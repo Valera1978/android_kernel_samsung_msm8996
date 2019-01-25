@@ -695,14 +695,14 @@ void xhci_stop(struct usb_hcd *hcd)
 	if (!(xhci->xhc_state & XHCI_STATE_HALTED)) {
 		spin_lock_irq(&xhci->lock);
 
-		xhci->xhc_state |= XHCI_STATE_HALTED;
-		xhci->cmd_ring_state = CMD_RING_STATE_STOPPED;
-		xhci_halt(xhci);
-		xhci_reset(xhci);
+	xhci->xhc_state |= XHCI_STATE_HALTED;
+	xhci->cmd_ring_state = CMD_RING_STATE_STOPPED;
+	xhci_halt(xhci);
+	xhci_reset(xhci);
 
-		spin_unlock_irq(&xhci->lock);
+	spin_unlock_irq(&xhci->lock);
 	}
-
+ 
 	if (!usb_hcd_is_primary_hcd(hcd)) {
 		mutex_unlock(&xhci->mutex);
 		return;

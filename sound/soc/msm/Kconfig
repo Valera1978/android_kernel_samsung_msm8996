@@ -20,16 +20,6 @@ config SND_SOC_QDSP6V2
 	 audio drivers. This includes q6asm, q6adm,
 	 q6afe interfaces to DSP using apr.
 
-config SND_SOC_QDSP6V2_VM
-	tristate "SoC ALSA audio driver for QDSP6V2 virtualization"
-	depends on MSM_QDSP6_APRV2_VM
-	help
-	 To add support for MSM QDSP6V2 virtualization
-	 Soc Audio.
-	 This will enable sound soc platform specific
-	 audio drivers. This includes q6asm, q6adm,
-	 q6afe interfaces to DSP using virtualized apr.
-
 config SND_SOC_QDSP_DEBUG
 	bool "QDSP Audio Driver Debug Feature"
 	help
@@ -79,7 +69,7 @@ config DTS_SRS_TM
 
 config QTI_PP
 	bool "Enable QTI PP"
-	depends on SND_SOC_MSM_QDSP6V2_INTF || SND_SOC_QDSP6V2_VM
+	depends on SND_SOC_MSM_QDSP6V2_INTF
 	help
 	 To add support for default QTI post processing.
 	 This support is to configure the post processing
@@ -155,38 +145,14 @@ config SND_SOC_MSM8996
 	select MSM_QDSP6V2_CODECS
 	select SND_SOC_WCD9330
 	select SND_SOC_WCD9335
-	select SND_SOC_WSA881X
 	select SND_SOC_MSM_HDMI_CODEC_RX
-	select DTS_SRS_TM
 	select QTI_PP
-	select SND_SOC_CPE
-	select MSM_ULTRASOUND
-	select DOLBY_DS2
-	select SND_HWDEP
-        select DTS_EAGLE
 	help
 	 To add support for SoC audio on MSM8996.
 	 This will enable sound soc drivers which
 	 interfaces with DSP, also it will enable
 	 the machine driver and the corresponding
 	 DAI-links
-
-config SND_SOC_MSM8996_VM
-	tristate "SoC Machine driver for MSM8996 virtualization"
-	select SND_SOC_QDSP6V2_VM
-	select SND_SOC_MSM_STUB
-	select SND_SOC_MSM_HOSTLESS_PCM
-	select SND_DYNAMIC_MINORS
-	select MSM_QDSP6_APRV2_VM
-	select MSM_QDSP6V2_CODECS
-	select QTI_PP
-	help
-	 To add support for SoC audio on MSM8996
-	 virtualization platform.
-	 This will enable sound soc drivers which
-	 interfaces with DSP using virtualized apr,
-	 also it will enable the machine driver and
-	 the corresponding DAI-links
 
 config SND_SOC_MSM8X16
 	tristate "SoC Machine driver for MSM8916"
@@ -268,14 +234,11 @@ config SND_SOC_MSM8909
 	select MSM_QDSP6_APRV3
 	select MSM_QDSP6V2_CODECS
 	select SND_SOC_MSM8X16_WCD
-	select SND_SOC_DIGITAL_CDC
 	select SND_SOC_WSA881X_ANALOG
 	select SND_SOC_WSA881X
 	select SND_SOC_WCD9335
         select SND_SOC_CPE
 	select SND_HWDEP
-	select MSM_BG_GLINK
-	select MSM_BG_CODEC
 	select QTI_PP
 	help
 	 To add support for SoC audio on MSM8909 boards.
@@ -302,4 +265,57 @@ config SND_SOC_MDM9640
 	 the machine drivers and the corresponding
 	 DAI-links.
 
+config SEC_SND_SOLUTION
+	tristate "Samsung sound solution"
+	default n
+	help
+		To add support for Samsung sound solution
+
+config SEC_VOC_SOLUTION
+	tristate "Samsung voice solution"
+	default n
+	help
+		To add support for Samsung voice solution
+
+config SND_SOC_JACK_AUDIO
+	tristate "Samsung Jack Audio"
+	default n
+	help
+		To add support for Samsung Jack Audio
+
+config MAINMIC_LDO
+	tristate "Samsung external mainmic ldo"
+	default n
+	help
+		To add support for Samsung external mainmic ldo
+
+config SND_SOC_PRIMARY_MI2S
+	tristate "Primary MI2S feature"
+	default n
+	help
+		To add support for Primary MI2S port
+
+config SND_SOC_QUAT_MI2S
+	tristate "Quaternary MI2S feature"
+	default n
+	help
+		To add support for Quaternary MI2S port
+
+config SND_SOC_TERTIARY_AUXPCM
+	tristate "Tertiary AUXPCM feature"
+	default n
+	help
+		To add support for Tertiary AUXPCM port
+
+config SND_SOC_ALWAYS_ON_MIC
+	tristate "Always MIC on feature"
+	default n
+	help
+		To add support for Always MIC on
+
+config SND_SOC_MI2S_TDM
+	tristate "TDM I/F feature"
+	default n
+	help
+		To add support for TDM I/F
 endmenu
