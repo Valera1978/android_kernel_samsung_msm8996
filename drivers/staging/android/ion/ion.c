@@ -1904,6 +1904,37 @@ static const struct file_operations debug_heap_fops = {
 	.release = single_release,
 };
 
+void show_ion_usage_simple(struct ion_device *dev, unsigned long is_simple, struct seq_file *s)
+{
+	struct ion_heap *heap;
+	struct ion_heap *system_heap = NULL;
+	unsigned long system_byte = 0;
+
+	if (!down_read_trylock(&dev->lock)) {
+		pr_err("Ion output would deadlock, can't print debug information\n");
+		return;
+	}
+
+	plist_for_each_entry(heap, &dev->heaps, node) {
+		if (!strcmp(heap->name, "system")) {
+			system_heap = heap;
+			break;
+		}
+	}
+	if (system_heap == NULL) {
+		up_read(&dev->lock);
+		return;
+	}
+	system_byte = (unsigned int)atomic_read(&system_heap->total_allocated);
+	if (s != NULL)
+		seq_printf(s, "SystemHeap:     %8lu kB\n", system_byte >> 10);
+	else
+		printk("SystemHeap:%lukB ", system_byte >> 10);
+	if (heap->debug_show)
+		heap->debug_show(heap, s, (void *)1);
+	up_read(&dev->lock);
+}
+
 void show_ion_usage(struct ion_device *dev)
 {
 	struct ion_heap *heap;

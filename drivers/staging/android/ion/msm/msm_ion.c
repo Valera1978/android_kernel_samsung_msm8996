@@ -113,6 +113,14 @@ static struct ion_heap_desc ion_heap_meta[] = {
 		.name	= ION_ADSP_HEAP_NAME,
 	},
 	{
+		.id	= ION_SECURE_CAMERA_HEAP_ID,
+		.name	= ION_SECURE_CAMERA_HEAP_NAME,
+	},
+	{
+		.id	= ION_SECURE_CAMERA_SCRATCH_HEAP_ID,
+		.name	= ION_SECURE_CAMERA_SCRATCH_HEAP_NAME,
+	},
+	{
 		.id	= ION_SECURE_DISPLAY_HEAP_ID,
 		.name	= ION_SECURE_DISPLAY_HEAP_NAME,
 	}
@@ -120,8 +128,13 @@ static struct ion_heap_desc ion_heap_meta[] = {
 #endif
 
 static int msm_ion_lowmem_notifier(struct notifier_block *nb,
-					unsigned long action, void *data)
+					unsigned long is_simple, void *data)
 {
+	if (is_simple) {
+		show_ion_usage_simple(idev, is_simple, (struct seq_file *)data);
+		return 0;
+	}
+
 	show_ion_usage(idev);
 	return 0;
 }

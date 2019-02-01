@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2014, 2017 The Linux Foundataion. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundataion. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,6 +24,11 @@
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
+
+#if defined(CONFIG_SENSOR_RETENTION)
+extern bool sensor_retention_mode;
+#endif
+extern bool retention_mode_pwr;
 
 void msm_camera_io_w(u32 data, void __iomem *addr)
 {
@@ -394,14 +399,8 @@ int msm_camera_config_vreg(struct device *dev, struct camera_vreg_t *cam_vreg,
 		pr_err("%s:%d vreg sequence invalid\n", __func__, __LINE__);
 		return -EINVAL;
 	}
-
 	if (!num_vreg_seq)
 		num_vreg_seq = num_vreg;
-
-	if ((cam_vreg == NULL) && num_vreg_seq) {
-		pr_err("%s:%d cam_vreg NULL\n", __func__, __LINE__);
-		return -EINVAL;
-	}
 
 	if (config) {
 		for (i = 0; i < num_vreg_seq; i++) {
@@ -655,6 +654,19 @@ int msm_camera_config_single_vreg(struct device *dev,
 		}
 		vreg_name = cam_vreg->reg_name;
 	}
+
+#if defined(CONFIG_SENSOR_RETENTION)
+	/* NOTE: Check cam power for sensor retention*/
+	if (sensor_retention_mode) {
+		if (!strcmp(vreg_name, "s2mpb02-ldo7")) {
+			pr_info("skip cam_vio(s2mpb02-ldo7). now sensor retention mode\n");
+			return 0;
+		} else if (!strcmp(vreg_name, "s2mpb02-ldo17")) {
+			pr_info("skip cam_vdd_ois2(s2mpb02-ldo17). now sensor retention mode\n");
+			return 0;
+		}
+	}
+#endif
 
 	if (config) {
 		CDBG("%s enable %s\n", __func__, vreg_name);
