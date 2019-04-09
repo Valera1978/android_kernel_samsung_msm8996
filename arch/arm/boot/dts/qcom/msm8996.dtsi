@@ -171,6 +171,14 @@
 					fsmgr_flags = "wait";
 					status = "ok";
 				};
+				 vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/platform/soc/7464900.sdhci/by-name/cache";
+					type = "squashfs";
+					mnt_flags = "ro,errors=panic,noload";
+					fsmgr_flags = "wait";
+					status = "ok";
+				};
 			};
 		};
 	};
