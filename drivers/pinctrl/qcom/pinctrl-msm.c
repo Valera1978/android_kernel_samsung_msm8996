@@ -42,6 +42,10 @@
 #endif
 #endif
 
+#ifdef CONFIG_SEC_FACTORY
+#undef CONFIG_ESE_SECURE
+#endif
+
 #define MAX_NR_GPIO 300
 #define PS_HOLD_OFFSET 0x820
 #define TLMM_EBI2_EMMC_GPIO_CFG 0x111000
@@ -678,6 +682,26 @@ static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++, gpio++) {
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+		if (gpio >= CONFIG_SENSORS_FP_SPI_GPIO_START
+			&& gpio <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+			continue;
+#endif
+
+#ifdef ENABLE_IRIS_SECURE_I2C_GPIO
+		if (gpio >= CONFIG_IRIS_I2C_GPIO_START
+			&& gpio <= CONFIG_IRIS_I2C_GPIO_END)
+			continue;
+#endif
+#ifdef CONFIG_MST_LDO
+		if (gpio == MST_GPIO_D_MINUS || gpio == MST_GPIO_D_PLUS)
+			continue;
+#endif
+#ifdef CONFIG_ESE_SECURE
+		if (gpio >= CONFIG_ESE_SPI_GPIO_START
+			&& gpio <= CONFIG_ESE_SPI_GPIO_END)
+			continue;
+#endif
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
 		seq_puts(s, "\n");
 	}
@@ -950,6 +974,9 @@ bool msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 	const struct msm_pingroup *g;
 	struct msm_pinctrl *pctrl = to_msm_pinctrl(gc);
 	struct irq_chip *chip = irq_get_chip(irq);
+#ifdef CONFIG_SEC_PM
+	struct irq_desc *desc_g;
+#endif
 	int irq_pin;
 	int handled = 0;
 	u32 val;
@@ -967,6 +994,27 @@ bool msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 		val = readl(pctrl->regs + g->intr_status_reg);
 		if (val & BIT(g->intr_status_bit)) {
 			irq_pin = irq_find_mapping(gc->irqdomain, i);
+#ifdef CONFIG_SEC_PM
+			desc_g = irq_to_desc(irq_pin);
+			if (wakeup_gpio_irq_flag == 1) {
+				if (desc_g && desc_g->action && desc_g->action->name) {
+					pr_warn("Resume caused by GPIO %d(irq %d), %s\n",
+							irq_pin, irq, desc_g->action->name);
+					last_resume_kernel_reason_len += 
+							sprintf(last_resume_kernel_reason + last_resume_kernel_reason_len,
+							"GPIO %d(irq %d), %s|",
+							irq_pin, irq, desc_g->action->name);
+				} else {
+					pr_warn("Resume caused by GPIO %d(irq %d)\n",
+							irq_pin, irq);
+					last_resume_kernel_reason_len += 
+							sprintf(last_resume_kernel_reason + last_resume_kernel_reason_len,
+							"GPIO %d(irq %d)|",
+							irq_pin, irq);
+				}
+				wakeup_gpio_irq_flag = 0;
+			}
+#endif
 			handled += generic_handle_irq(irq_pin);
 		}
 	}
