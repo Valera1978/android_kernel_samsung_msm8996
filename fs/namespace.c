@@ -1981,7 +1981,12 @@ struct mount *copy_tree(struct mount *mnt, struct dentry *dentry,
 			struct mount *t = NULL;
 			if (!(flag & CL_COPY_UNBINDABLE) &&
 			    IS_MNT_UNBINDABLE(s)) {
+
+#ifdef CONFIG_RKP_NS_PROT
+				if (s->mnt->mnt_flags & MNT_LOCKED) {
+#else
 				if (s->mnt.mnt_flags & MNT_LOCKED) {
+#endif
 					/* Both unbindable and locked. */
 					q = ERR_PTR(-EPERM);
 					goto out;
